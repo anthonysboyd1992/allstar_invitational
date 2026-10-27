@@ -73,7 +73,7 @@ new #[Title('Competitors')] class extends Component
     {
         $direction = $this->sortBy === 'weight' ? 'desc' : 'asc';
 
-        return Competitor::query()
+        $competitors = Competitor::query()
             ->when($this->search !== '', function ($query): void {
                 $term = '%'.$this->search.'%';
                 $query->where(fn ($inner) => $inner
@@ -84,9 +84,10 @@ new #[Title('Competitors')] class extends Component
                     ->orWhere('transponder', 'like', $term));
             })
             ->when(in_array($this->sortBy, ['pill_number', 'weight'], true), fn ($query) => $query->orderByRaw("{$this->sortBy} is null"))
-            ->orderBy($this->sortBy, $direction)
-            ->orderBy('last_name')
+            ->when($this->sortBy !== 'car_number', fn ($query) => $query->orderBy($this->sortBy, $direction)->orderBy('last_name'))
             ->get();
+
+        return $this->sortBy === 'car_number' ? Competitor::sortByCarNumber($competitors) : $competitors;
     }
 
     #[Computed]

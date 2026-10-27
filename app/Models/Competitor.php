@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
 use RuntimeException;
 
@@ -76,6 +77,22 @@ class Competitor extends Model
         }
 
         $this->forceFill(['headshot_path' => null]);
+    }
+
+    /**
+     * Order by car number the way people read them (9, 10, 71, 71H), then last name, with no car number last.
+     *
+     * @template TCollection of \Illuminate\Support\Collection<int, Competitor>
+     *
+     * @param  TCollection  $competitors
+     * @return TCollection
+     */
+    public static function sortByCarNumber(Collection $competitors): Collection
+    {
+        return $competitors->sort(fn (Competitor $a, Competitor $b): int => (blank($a->car_number) <=> blank($b->car_number))
+            ?: strnatcasecmp((string) $a->car_number, (string) $b->car_number)
+            ?: strcasecmp((string) $a->last_name, (string) $b->last_name)
+            ?: strcasecmp((string) $a->first_name, (string) $b->first_name))->values();
     }
 
     /**

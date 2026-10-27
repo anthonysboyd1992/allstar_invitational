@@ -223,4 +223,19 @@ class CompetitorsPageTest extends TestCase
 
         $this->assertSame([$competitors[2]->id], Competitor::query()->pluck('id')->all());
     }
+
+    public function test_competitors_sort_by_car_number_then_last_name(): void
+    {
+        $this->actingAs(User::factory()->create());
+
+        foreach ([['10', 'Adams'], [null, 'Baker'], ['71H', 'Cole'], ['9', 'Zane'], ['9', 'Avery'], ['71', 'Dunn']] as [$carNumber, $lastName]) {
+            Competitor::factory()->create(['car_number' => $carNumber, 'last_name' => $lastName]);
+        }
+
+        $expected = ['Avery', 'Zane', 'Adams', 'Dunn', 'Cole', 'Baker'];
+
+        $this->assertSame($expected, Livewire::test('pages::competitors')->get('competitors')->pluck('last_name')->all());
+        $this->assertSame($expected, Livewire::test('pages::lineups')->get('roster')->pluck('last_name')->all());
+        $this->assertSame($expected, Livewire::test('pages::vmix-data')->get('drivers')->pluck('last_name')->all());
+    }
 }
