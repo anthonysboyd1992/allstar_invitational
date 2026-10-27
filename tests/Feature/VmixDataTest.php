@@ -300,7 +300,7 @@ class VmixDataTest extends TestCase
         $component->set("fieldValues.{$field->id}", '');
         $row = $this->getJson(route('feeds.data'))->json('ringers.0');
         $this->assertSame('', $row['ringer_1_name']);
-        $this->assertStringEndsWith('clear.png?v=0', $row['ringer_1_headshot']);
+        $this->assertSame(asset(VmixFeed::ClearHeadshot), $row['ringer_1_headshot']);
     }
 
     public function test_manual_fields_wait_for_update_and_show_what_is_on_air(): void

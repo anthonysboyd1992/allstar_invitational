@@ -10,6 +10,11 @@ use App\Models\VmixSection;
 class VmixFeed
 {
     /**
+     * Fully transparent PNG at the default headshot size, in public/.
+     */
+    public const ClearHeadshot = 'images/clear-headshot.png';
+
+    /**
      * @return array{Lineup: list<array<string, string|int>>}
      */
     public function lineup(?Race $race = null): array
@@ -60,7 +65,7 @@ class VmixFeed
         return [
             $this->raceHeader(Setting::activeRace(), $className) + [
                 'Driver.Text' => (string) $competitor?->car_number,
-                'Headshot.Source' => $competitor ? $this->headshot($competitor, $className) : $this->graphic('clear.png'),
+                'Headshot.Source' => $this->headshotFor($competitor),
                 'FullName.Text' => (string) $competitor?->full_name,
                 'Hometown.Text' => (string) $competitor?->hometown,
                 'Accolades.Text' => (string) $competitor?->accolades,
@@ -116,7 +121,7 @@ class VmixFeed
                 "num_name{$slot}.Text" => '',
                 "Hometown{$slot}.Text" => '',
                 "DriverKey{$slot}" => '',
-                "Headshot{$slot}.Source" => $this->graphic('clear.png'),
+                "Headshot{$slot}.Source" => $this->headshotFor(null),
             ];
         }
 
@@ -134,7 +139,7 @@ class VmixFeed
             "num_name{$slot}.Text" => $isLeft ? "{$number} - {$fullName}" : "{$fullName} - {$number}",
             "Hometown{$slot}.Text" => (string) $competitor->hometown,
             "DriverKey{$slot}" => $competitor->driverKey($className),
-            "Headshot{$slot}.Source" => $this->headshot($competitor, $className),
+            "Headshot{$slot}.Source" => $this->headshotFor($competitor),
         ];
     }
 
@@ -149,19 +154,10 @@ class VmixFeed
     }
 
     /**
-     * The headshot URL vMix should load for a driver, or clear.png when there is no driver.
+     * The uploaded headshot URL vMix should load for a driver, or a transparent image when there is no driver or photo.
      */
     public function headshotFor(?Competitor $competitor): string
     {
-        return $competitor ? $this->headshot($competitor, $this->className()) : $this->graphic('clear.png');
-    }
-
-    private function headshot(Competitor $competitor, string $className): string
-    {
-        if ($url = $competitor->headshotUrl()) {
-            return $url;
-        }
-
-        return config('vmix.headshots_url').$competitor->driverKey($className).'.png?v='.config('vmix.asset_version');
+        return $competitor?->headshotUrl() ?? asset(self::ClearHeadshot);
     }
 }

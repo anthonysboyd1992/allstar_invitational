@@ -6,6 +6,7 @@ use App\Models\Competitor;
 use App\Models\Race;
 use App\Models\Setting;
 use App\Models\User;
+use App\Services\VmixFeed;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -123,7 +124,7 @@ class CompetitorHeadshotTest extends TestCase
 
         $page = $this->getJson(route('feeds.lineup'))->json('Lineup.0');
         $this->assertSame($url, $page['Headshot1.Source']);
-        $this->assertStringStartsWith(config('vmix.headshots_url'), $page['Headshot2.Source']);
+        $this->assertSame(asset(VmixFeed::ClearHeadshot), $page['Headshot2.Source']);
 
         $this->assertSame($url, $this->getJson(route('feeds.driver'))->json('0')['Headshot.Source']);
     }

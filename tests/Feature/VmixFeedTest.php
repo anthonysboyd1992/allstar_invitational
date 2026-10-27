@@ -6,6 +6,7 @@ use App\Models\Competitor;
 use App\Models\Race;
 use App\Models\RaceType;
 use App\Models\Setting;
+use App\Services\VmixFeed;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -45,6 +46,9 @@ class VmixFeedTest extends TestCase
             ->assertHeader('Access-Control-Allow-Origin', '*');
 
         $expected = json_decode(file_get_contents(base_path('tests/Fixtures/lineup-heat-18.json')), true);
+        foreach (range(1, 12) as $slot) {
+            $expected['Lineup'][0]["Headshot{$slot}.Source"] = asset(VmixFeed::ClearHeadshot);
+        }
 
         $this->assertSame($expected, json_decode($response->getContent(), true));
     }
@@ -97,11 +101,11 @@ class VmixFeedTest extends TestCase
 
         $this->assertCount(12 * 2, $sources);
         $this->assertNotContains('', $sources);
-        $this->assertStringEndsWith('clear.png?v=0', $page['Headshot4.Source']);
+        $this->assertSame(asset(VmixFeed::ClearHeadshot), $page['Headshot4.Source']);
         $this->assertStringEndsWith('clear.png?v=0', $page['LU_BG4.Source']);
 
         $driverFeed = $this->getJson(route('feeds.driver'))->json('0');
-        $this->assertStringEndsWith('clear.png?v=0', $driverFeed['Headshot.Source']);
+        $this->assertSame(asset(VmixFeed::ClearHeadshot), $driverFeed['Headshot.Source']);
     }
 
     public function test_driver_feed_is_a_single_row_without_a_wrapper(): void
@@ -126,7 +130,7 @@ class VmixFeedTest extends TestCase
             'Race.Text' => 'Heat 4',
             'Event.Text' => 'IMCA Modified Heat 4',
             'Driver.Text' => '222',
-            'Headshot.Source' => 'https://d2ms7y76opxgn0.cloudfront.net/assets/demo/headshots/DrakeScott222IMCAModified.png?v=0',
+            'Headshot.Source' => asset(VmixFeed::ClearHeadshot),
             'FullName.Text' => 'Scott Drake',
             'Hometown.Text' => 'Diamond MO',
             'Accolades.Text' => '2025 Champion',
