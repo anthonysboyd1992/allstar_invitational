@@ -12,13 +12,6 @@ class VmixFeed
     public const ClearDefaultSize = 256;
 
     /**
-     * Size of lu_bg_l.png / lu_bg_r.png, used for the transparent stand-in on empty lineup rows.
-     */
-    public const LineupBackgroundWidth = 543;
-
-    public const LineupBackgroundHeight = 97;
-
-    /**
      * @return array{Lineup: list<array<string, string|int>>}
      */
     public function lineup(?Race $race = null): array
@@ -119,7 +112,6 @@ class VmixFeed
                 "StartPos{$slot}" => '',
                 "Number{$slot}.Text" => '',
                 "FullName{$slot}.Text" => '',
-                "LU_BG{$slot}.Source" => self::clearUrl(self::LineupBackgroundWidth, self::LineupBackgroundHeight),
                 "FirstName{$slot}.Text" => '',
                 "LastName{$slot}.Text" => '',
                 "num_name{$slot}.Text" => '',
@@ -137,7 +129,6 @@ class VmixFeed
             "StartPos{$slot}" => (string) $startPosition,
             "Number{$slot}.Text" => $number,
             "FullName{$slot}.Text" => $fullName,
-            "LU_BG{$slot}.Source" => $this->graphic($isLeft ? 'lu_bg_l.png' : 'lu_bg_r.png'),
             "FirstName{$slot}.Text" => $competitor->first_name,
             "LastName{$slot}.Text" => $competitor->last_name,
             "num_name{$slot}.Text" => $isLeft ? "{$number} - {$fullName}" : "{$fullName} - {$number}",
@@ -150,11 +141,6 @@ class VmixFeed
     private function className(): string
     {
         return (string) Setting::get(Setting::ClassName, '');
-    }
-
-    private function graphic(string $file): string
-    {
-        return asset('images/graphics/'.$file).'?v='.config('vmix.asset_version');
     }
 
     /**

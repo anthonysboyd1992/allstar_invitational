@@ -143,6 +143,27 @@ class LineupBoardTest extends TestCase
         $this->assertSame([$first->id], $feature->lineupIds());
     }
 
+    public function test_drivers_in_the_live_race_drop_to_the_bottom_of_the_roster(): void
+    {
+        $heat = Race::factory()->create();
+        $feature = Race::factory()->create();
+        $one = Competitor::factory()->create(['car_number' => '1']);
+        $twoB = Competitor::factory()->create(['car_number' => '2B']);
+        $eleven = Competitor::factory()->create(['car_number' => '11']);
+
+        $component = Livewire::test('pages::lineups')
+            ->call('goLive', $heat->id)
+            ->call('addToLiveRace', $one->id);
+
+        $this->assertSame([$twoB->id, $eleven->id, $one->id], $component->get('roster')->pluck('id')->all());
+
+        $component->call('addToLiveRace', $eleven->id);
+        $this->assertSame([$twoB->id, $one->id, $eleven->id], $component->get('roster')->pluck('id')->all());
+
+        $component->call('goLive', $feature->id);
+        $this->assertSame([$one->id, $twoB->id, $eleven->id], $component->get('roster')->pluck('id')->all());
+    }
+
     public function test_clicking_a_driver_without_a_live_race_shows_an_error(): void
     {
         $driver = Competitor::factory()->create();

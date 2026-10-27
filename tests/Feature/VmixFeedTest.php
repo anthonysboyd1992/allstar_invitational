@@ -48,11 +48,6 @@ class VmixFeedTest extends TestCase
         $expected = json_decode(file_get_contents(base_path('tests/Fixtures/lineup-heat-18.json')), true);
         foreach (range(1, 12) as $slot) {
             $expected['Lineup'][0]["Headshot{$slot}.Source"] = VmixFeed::clearUrl(256, 256);
-            $expected['Lineup'][0]["LU_BG{$slot}.Source"] = match (true) {
-                $slot > 8 => VmixFeed::clearUrl(543, 97),
-                $slot % 2 === 1 => asset('images/graphics/lu_bg_l.png').'?v=0',
-                default => asset('images/graphics/lu_bg_r.png').'?v=0',
-            };
         }
 
         $this->assertSame($expected, json_decode($response->getContent(), true));
@@ -104,10 +99,9 @@ class VmixFeedTest extends TestCase
         $page = $this->getJson(route('feeds.lineup'))->json('Lineup.0');
         $sources = array_filter($page, fn (string $key): bool => str_ends_with($key, '.Source'), ARRAY_FILTER_USE_KEY);
 
-        $this->assertCount(12 * 2, $sources);
+        $this->assertSame(array_map(fn (int $slot): string => "Headshot{$slot}.Source", range(1, 12)), array_keys($sources));
         $this->assertNotContains('', $sources);
         $this->assertSame(VmixFeed::clearUrl(256, 256), $page['Headshot4.Source']);
-        $this->assertSame(VmixFeed::clearUrl(543, 97), $page['LU_BG4.Source']);
 
         $driverFeed = $this->getJson(route('feeds.driver'))->json('0');
         $this->assertSame(VmixFeed::clearUrl(256, 256), $driverFeed['Headshot.Source']);

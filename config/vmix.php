@@ -8,8 +8,6 @@ return [
 
     'headshot_height' => (int) env('VMIX_HEADSHOT_HEIGHT', 256),
 
-    'asset_version' => env('VMIX_ASSET_VERSION', '0'),
-
     'slots_per_page' => 12,
 
 ];

@@ -40,10 +40,13 @@ new #[Title('Races & Lineups')] class extends Component
             ->get();
     }
 
+    /**
+     * Drivers not yet in the live race first, then the ones already in it.
+     */
     #[Computed]
     public function roster(): Collection
     {
-        return Competitor::query()
+        $competitors = Competitor::query()
             ->withCount('entries')
             ->when($this->search !== '', function ($query): void {
                 $term = '%'.$this->search.'%';
@@ -53,8 +56,12 @@ new #[Title('Races & Lineups')] class extends Component
                     ->orWhere('car_number', 'like', $term));
             })
             ->get()
-            ->sortBy('car_number', SORT_NATURAL | SORT_FLAG_CASE)
-            ->values();
+            ->sortBy('car_number', SORT_NATURAL | SORT_FLAG_CASE);
+
+        $liveLineupIds = $this->liveRace?->entries->pluck('competitor_id')->all() ?? [];
+        [$inLiveRace, $available] = $competitors->partition(fn (Competitor $competitor) => in_array($competitor->id, $liveLineupIds, true));
+
+        return $available->concat($inLiveRace)->values();
     }
 
     #[Computed]
@@ -373,50 +380,52 @@ new #[Title('Races & Lineups')] class extends Component
             >
         </div>
 
-        <div
-            wire:key="roster-{{ $version }}"
-            wire:sort="placeDriver"
-            x-sort:config="{ group: { name: 'drivers', pull: 'clone', put: false }, sort: false }"
-            class="flex-1 space-y-1 overflow-y-auto p-2"
-        >
-            @php($liveLineupIds = $this->liveRace?->entries->pluck('competitor_id')->all() ?? [])
-            @forelse ($this->roster as $competitor)
-                @php($inLiveRace = in_array($competitor->id, $liveLineupIds, true))
-                <div
-                    wire:key="roster-{{ $version }}-{{ $competitor->id }}"
-                    wire:sort:item="c{{ $competitor->id }}"
-                    wire:click="addToLiveRace({{ $competitor->id }})"
-                    @class([
-                        'flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 text-sm hover:border-amber-400',
-                        'border-red-300 bg-red-50' => $this->activeDriverId === $competitor->id,
-                        'border-slate-200 bg-white' => $this->activeDriverId !== $competitor->id,
-                        'opacity-50' => $inLiveRace,
-                    ])
-                >
-                    <span class="w-10 shrink-0 rounded bg-slate-900 py-0.5 text-center text-xs font-black text-white">{{ $competitor->car_number ?: '—' }}</span>
-                    <span class="min-w-0 flex-1">
-                        <span class="block truncate font-semibold">{{ $competitor->full_name }}</span>
-                        <span class="block text-xs text-slate-400">
-                            Pill {{ $competitor->pill_number ?? '—' }} · {{ $competitor->weight ? $competitor->weight.' lb' : '— lb' }} · {{ $competitor->entries_count }} {{ Str::plural('race', $competitor->entries_count) }}
-                        </span>
-                    </span>
-                    <button
-                        type="button"
-                        wire:sort:ignore
-                        wire:click.stop="showDriver({{ $competitor->id }})"
-                        title="Send to the driver feed"
+        <div class="flex-1 overflow-y-auto p-2">
+            <div
+                wire:key="roster-{{ $version }}"
+                wire:sort="placeDriver"
+                x-sort:config="{ group: { name: 'drivers', pull: 'clone', put: false }, sort: false }"
+                class="space-y-1"
+            >
+                @php($liveLineupIds = $this->liveRace?->entries->pluck('competitor_id')->all() ?? [])
+                @forelse ($this->roster as $competitor)
+                    @php($inLiveRace = in_array($competitor->id, $liveLineupIds, true))
+                    <div
+                        wire:key="roster-{{ $version }}-{{ $competitor->id }}"
+                        wire:sort:item="c{{ $competitor->id }}"
+                        wire:click="addToLiveRace({{ $competitor->id }})"
                         @class([
-                            'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold',
-                            'bg-red-600 text-white' => $this->activeDriverId === $competitor->id,
-                            'bg-slate-100 text-slate-500 hover:bg-slate-200' => $this->activeDriverId !== $competitor->id,
+                            'flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 text-sm hover:border-amber-400',
+                            'border-red-300 bg-red-50' => $this->activeDriverId === $competitor->id,
+                            'border-slate-200 bg-white' => $this->activeDriverId !== $competitor->id,
+                            'opacity-50' => $inLiveRace,
                         ])
-                    >{{ $this->activeDriverId === $competitor->id ? 'ON AIR' : 'Show' }}</button>
-                </div>
-            @empty
-                <p class="p-4 text-center text-sm text-slate-400">
-                    No drivers. <a href="{{ route('competitors') }}" wire:navigate class="text-amber-600 underline">Add competitors</a>
-                </p>
-            @endforelse
+                    >
+                        <span class="w-10 shrink-0 rounded bg-slate-900 py-0.5 text-center text-xs font-black text-white">{{ $competitor->car_number ?: '—' }}</span>
+                        <span class="min-w-0 flex-1">
+                            <span class="block truncate font-semibold">{{ $competitor->full_name }}</span>
+                            <span class="block text-xs text-slate-400">
+                                Pill {{ $competitor->pill_number ?? '—' }} · {{ $competitor->weight ? $competitor->weight.' lb' : '— lb' }} · {{ $competitor->entries_count }} {{ Str::plural('race', $competitor->entries_count) }}
+                            </span>
+                        </span>
+                        <button
+                            type="button"
+                            wire:sort:ignore
+                            wire:click.stop="showDriver({{ $competitor->id }})"
+                            title="Send to the driver feed"
+                            @class([
+                                'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold',
+                                'bg-red-600 text-white' => $this->activeDriverId === $competitor->id,
+                                'bg-slate-100 text-slate-500 hover:bg-slate-200' => $this->activeDriverId !== $competitor->id,
+                            ])
+                        >{{ $this->activeDriverId === $competitor->id ? 'ON AIR' : 'Show' }}</button>
+                    </div>
+                @empty
+                    <p class="p-4 text-center text-sm text-slate-400">
+                        No drivers. <a href="{{ route('competitors') }}" wire:navigate class="text-amber-600 underline">Add competitors</a>
+                    </p>
+                @endforelse
+            </div>
         </div>
     </aside>
 
