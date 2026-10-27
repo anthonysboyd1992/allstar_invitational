@@ -199,7 +199,7 @@ class VmixDataTest extends TestCase
         $this->assertNull($field->refresh()->value);
 
         $this->getJson(route('feeds.data'))
-            ->assertExactJson(['ringers' => [['logo' => config('vmix.graphics_url').'clear.png?v='.config('vmix.asset_version')]]]);
+            ->assertExactJson(['ringers' => [['logo' => VmixFeed::clearUrl(400, 200)]]]);
     }
 
     public function test_image_fields_need_a_valid_size_and_default_to_1920_by_1080(): void
@@ -300,7 +300,7 @@ class VmixDataTest extends TestCase
         $component->set("fieldValues.{$field->id}", '');
         $row = $this->getJson(route('feeds.data'))->json('ringers.0');
         $this->assertSame('', $row['ringer_1_name']);
-        $this->assertSame(asset(VmixFeed::ClearHeadshot), $row['ringer_1_headshot']);
+        $this->assertSame(VmixFeed::clearUrl(256, 256), $row['ringer_1_headshot']);
     }
 
     public function test_manual_fields_wait_for_update_and_show_what_is_on_air(): void

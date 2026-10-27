@@ -2,8 +2,6 @@
 
 return [
 
-    'graphics_url' => env('VMIX_GRAPHICS_URL', 'https://d2ms7y76opxgn0.cloudfront.net/assets/demo/graphics/default/'),
-
     'media_disk' => env('VMIX_MEDIA_DISK', 'public'),
 
     'headshot_width' => (int) env('VMIX_HEADSHOT_WIDTH', 256),

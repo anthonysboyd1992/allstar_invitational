@@ -29,3 +29,4 @@ Route::middleware('auth')->group(function () {
 Route::get('/vmix/lineup.json', [VmixFeedController::class, 'lineup'])->name('feeds.lineup');
 Route::get('/vmix/driver.json', [VmixFeedController::class, 'driver'])->name('feeds.driver');
 Route::get('/vmix/data.json', [VmixFeedController::class, 'data'])->name('feeds.data');
+Route::get('/vmix/clear.png', [VmixFeedController::class, 'clear'])->name('feeds.clear');

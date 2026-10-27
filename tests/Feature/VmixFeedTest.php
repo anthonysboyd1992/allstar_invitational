@@ -47,7 +47,12 @@ class VmixFeedTest extends TestCase
 
         $expected = json_decode(file_get_contents(base_path('tests/Fixtures/lineup-heat-18.json')), true);
         foreach (range(1, 12) as $slot) {
-            $expected['Lineup'][0]["Headshot{$slot}.Source"] = asset(VmixFeed::ClearHeadshot);
+            $expected['Lineup'][0]["Headshot{$slot}.Source"] = VmixFeed::clearUrl(256, 256);
+            $expected['Lineup'][0]["LU_BG{$slot}.Source"] = match (true) {
+                $slot > 8 => VmixFeed::clearUrl(543, 97),
+                $slot % 2 === 1 => asset('images/graphics/lu_bg_l.png').'?v=0',
+                default => asset('images/graphics/lu_bg_r.png').'?v=0',
+            };
         }
 
         $this->assertSame($expected, json_decode($response->getContent(), true));
@@ -101,11 +106,11 @@ class VmixFeedTest extends TestCase
 
         $this->assertCount(12 * 2, $sources);
         $this->assertNotContains('', $sources);
-        $this->assertSame(asset(VmixFeed::ClearHeadshot), $page['Headshot4.Source']);
-        $this->assertStringEndsWith('clear.png?v=0', $page['LU_BG4.Source']);
+        $this->assertSame(VmixFeed::clearUrl(256, 256), $page['Headshot4.Source']);
+        $this->assertSame(VmixFeed::clearUrl(543, 97), $page['LU_BG4.Source']);
 
         $driverFeed = $this->getJson(route('feeds.driver'))->json('0');
-        $this->assertSame(asset(VmixFeed::ClearHeadshot), $driverFeed['Headshot.Source']);
+        $this->assertSame(VmixFeed::clearUrl(256, 256), $driverFeed['Headshot.Source']);
     }
 
     public function test_driver_feed_is_a_single_row_without_a_wrapper(): void
@@ -130,11 +135,41 @@ class VmixFeedTest extends TestCase
             'Race.Text' => 'Heat 4',
             'Event.Text' => 'IMCA Modified Heat 4',
             'Driver.Text' => '222',
-            'Headshot.Source' => asset(VmixFeed::ClearHeadshot),
+            'Headshot.Source' => VmixFeed::clearUrl(256, 256),
             'FullName.Text' => 'Scott Drake',
             'Hometown.Text' => 'Diamond MO',
             'Accolades.Text' => '2025 Champion',
             'Mode' => 'name_only',
         ]], json_decode($response->getContent(), true));
+    }
+
+    public function test_clear_image_is_a_transparent_png_of_the_requested_size(): void
+    {
+        $response = $this->get(route('feeds.clear', ['w' => 543, 'h' => 97]))
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/png')
+            ->assertHeader('Access-Control-Allow-Origin', '*');
+
+        $image = imagecreatefromstring($response->getContent());
+        $this->assertSame([543, 97], [imagesx($image), imagesy($image)]);
+        $this->assertSame(127, imagecolorsforindex($image, imagecolorat($image, 271, 48))['alpha']);
+
+        $oversized = imagecreatefromstring($this->get(route('feeds.clear', ['w' => 99999, 'h' => 0]))->getContent());
+        $this->assertSame([4096, 1], [imagesx($oversized), imagesy($oversized)]);
+    }
+
+    public function test_lineup_images_all_link_to_this_server(): void
+    {
+        $race = Race::factory()->create();
+        $race->syncLineup(Competitor::factory()->count(3)->create()->pluck('id')->all());
+        Setting::put(Setting::ActiveRace, (string) $race->id);
+
+        $page = $this->getJson(route('feeds.lineup'))->json('Lineup.0');
+
+        foreach ($page as $key => $value) {
+            if (str_ends_with($key, '.Source')) {
+                $this->assertStringStartsWith(url('/'), $value, $key);
+            }
+        }
     }
 }

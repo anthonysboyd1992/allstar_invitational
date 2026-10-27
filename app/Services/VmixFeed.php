@@ -9,10 +9,14 @@ use App\Models\VmixSection;
 
 class VmixFeed
 {
+    public const ClearDefaultSize = 256;
+
     /**
-     * Fully transparent PNG at the default headshot size, in public/.
+     * Size of lu_bg_l.png / lu_bg_r.png, used for the transparent stand-in on empty lineup rows.
      */
-    public const ClearHeadshot = 'images/clear-headshot.png';
+    public const LineupBackgroundWidth = 543;
+
+    public const LineupBackgroundHeight = 97;
 
     /**
      * @return array{Lineup: list<array<string, string|int>>}
@@ -115,7 +119,7 @@ class VmixFeed
                 "StartPos{$slot}" => '',
                 "Number{$slot}.Text" => '',
                 "FullName{$slot}.Text" => '',
-                "LU_BG{$slot}.Source" => $this->graphic('clear.png'),
+                "LU_BG{$slot}.Source" => self::clearUrl(self::LineupBackgroundWidth, self::LineupBackgroundHeight),
                 "FirstName{$slot}.Text" => '',
                 "LastName{$slot}.Text" => '',
                 "num_name{$slot}.Text" => '',
@@ -150,7 +154,15 @@ class VmixFeed
 
     private function graphic(string $file): string
     {
-        return config('vmix.graphics_url').$file.'?v='.config('vmix.asset_version');
+        return asset('images/graphics/'.$file).'?v='.config('vmix.asset_version');
+    }
+
+    /**
+     * Link to a transparent PNG generated on this server at the given size.
+     */
+    public static function clearUrl(int $width, int $height): string
+    {
+        return route('feeds.clear', ['w' => $width, 'h' => $height]);
     }
 
     /**
@@ -158,6 +170,6 @@ class VmixFeed
      */
     public function headshotFor(?Competitor $competitor): string
     {
-        return $competitor?->headshotUrl() ?? asset(self::ClearHeadshot);
+        return $competitor?->headshotUrl() ?? self::clearUrl(config('vmix.headshot_width'), config('vmix.headshot_height'));
     }
 }

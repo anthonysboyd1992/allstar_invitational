@@ -102,7 +102,7 @@ class VmixField extends Model
     public function feedValues(Collection $drivers): array
     {
         if ($this->isImage()) {
-            return [$this->key => $this->imageUrl($this->live_value) ?? config('vmix.graphics_url').'clear.png?v='.config('vmix.asset_version')];
+            return [$this->key => $this->imageUrl($this->live_value) ?? VmixFeed::clearUrl($this->width ?: self::DefaultWidth, $this->height ?: self::DefaultHeight)];
         }
 
         if (! $this->isDriver()) {

@@ -124,7 +124,7 @@ class CompetitorHeadshotTest extends TestCase
 
         $page = $this->getJson(route('feeds.lineup'))->json('Lineup.0');
         $this->assertSame($url, $page['Headshot1.Source']);
-        $this->assertSame(asset(VmixFeed::ClearHeadshot), $page['Headshot2.Source']);
+        $this->assertSame(VmixFeed::clearUrl(config('vmix.headshot_width'), config('vmix.headshot_height')), $page['Headshot2.Source']);
 
         $this->assertSame($url, $this->getJson(route('feeds.driver'))->json('0')['Headshot.Source']);
     }

@@ -38,14 +38,34 @@ class ImageCropper
         $cropX = (int) floor(($sourceWidth - $cropWidth) / 2);
         $cropY = (int) floor(($sourceHeight - $cropHeight) / 2);
 
+        $canvas = $this->transparentCanvas($width, $height);
+        imagecopyresampled($canvas, $source, 0, 0, $cropX, $cropY, $width, $height, $cropWidth, $cropHeight);
+
+        return $this->png($canvas);
+    }
+
+    /**
+     * @return string PNG bytes of a fully transparent image
+     */
+    public function transparent(int $width, int $height): string
+    {
+        return $this->png($this->transparentCanvas($width, $height));
+    }
+
+    private function transparentCanvas(int $width, int $height): GdImage
+    {
         $canvas = imagecreatetruecolor($width, $height);
         imagealphablending($canvas, false);
         imagesavealpha($canvas, true);
         imagefill($canvas, 0, 0, imagecolorallocatealpha($canvas, 0, 0, 0, 127));
-        imagecopyresampled($canvas, $source, 0, 0, $cropX, $cropY, $width, $height, $cropWidth, $cropHeight);
 
+        return $canvas;
+    }
+
+    private function png(GdImage $image): string
+    {
         ob_start();
-        imagepng($canvas, null, 6);
+        imagepng($image, null, 6);
 
         return (string) ob_get_clean();
     }
