@@ -346,6 +346,7 @@ class VmixDataTest extends TestCase
         $this->assertSame('0', $this->getJson(route('feeds.data'))->json('interview.0')['guest_number']);
 
         Livewire::test('pages::vmix-data', ['selectedSectionId' => $section->id])
+            ->call('toggleSection', $section->id)
             ->assertSee('#0 Zero Car');
     }
 
@@ -366,6 +367,7 @@ class VmixDataTest extends TestCase
         [$ringer, $title, $note, $auto] = array_map(fn (string $key) => $this->itemField($section, $key), ['ringer', 'title', 'note', 'auto']);
 
         $component = Livewire::test('pages::vmix-data', ['selectedSectionId' => $section->id])
+            ->call('toggleSection', $section->id)
             ->set("fieldValues.{$ringer->id}", (string) $replacement->id)
             ->set("fieldValues.{$title->id}", 'Ringer Lineup')
             ->set("fieldValues.{$note->id}", 'New')
@@ -681,9 +683,10 @@ class VmixDataTest extends TestCase
         $component = fn () => Livewire::test('pages::vmix-data', ['selectedSectionId' => $item->id]);
 
         $open = $component();
-        $open->assertSee('From template')->assertDontSee('Add group');
+        $open->assertDontSee('From template');
+        $open->call('toggleSection', $item->id)->assertSee('From template')->assertDontSee('Add group');
         $open->call('toggleSection', $item->id)->assertDontSee('From template');
-        $open->call('toggleSection', $item->id)->assertSee('From template');
+        $open->call('selectSection', $item->id)->assertDontSee('From template');
 
         $component()->set('newGroupName', 'Extra')->call('addGroup')->assertForbidden();
         $component()->call('deleteField', $field->id)->assertForbidden();
@@ -950,9 +953,10 @@ class VmixDataTest extends TestCase
             ->call('addPlaceholder')
             ->assertHasNoErrors()
             ->assertSee('Placeholder 1')
-            ->assertSee('no data fields');
+            ->assertDontSee('no data fields');
 
         $placeholder = VmixSection::query()->where('is_placeholder', true)->sole();
+        $component->call('toggleSection', $placeholder->id)->assertSee('no data fields');
         $this->assertTrue($placeholder->isInRunOfShow());
         $this->assertFalse(VmixSection::query()->standalone()->whereKey($placeholder->id)->exists());
         $this->getJson(route('feeds.data'))->assertExactJson(['interview' => [['guest' => 'Max']]]);
@@ -1028,7 +1032,9 @@ class VmixDataTest extends TestCase
 
         $placeholder = VmixSection::query()->where('is_placeholder', true)->sole();
         $component
-            ->call('selectSection', $placeholder->id)
+            ->call('toggleSection', $placeholder->id)
+            ->assertSee('Hold until the trophy is ready')
+            ->assertSet('expandedSectionId', $placeholder->id)
             ->assertSet('sectionDescriptionLines', ['Hold until the trophy is ready', ''])
             ->set('sectionDescriptionLines.0', str_repeat('a', VmixSection::DescriptionLineMax + 1))
             ->assertSet('sectionDescriptionLines.0', 'Hold until the trophy is ready')

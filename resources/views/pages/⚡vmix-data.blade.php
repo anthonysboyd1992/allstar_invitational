@@ -27,6 +27,8 @@ new #[Title('vMix Data')] class extends Component
     #[Url(as: 'section')]
     public ?int $selectedSectionId = null;
 
+    public ?int $expandedSectionId = null;
+
     public string $newSectionName = '';
 
     public string $newStandaloneName = '';
@@ -183,6 +185,10 @@ new #[Title('vMix Data')] class extends Component
 
     public function selectSection(int $sectionId): void
     {
+        if ($this->expandedSectionId !== $sectionId) {
+            $this->expandedSectionId = null;
+        }
+
         $this->selectedSectionId = $sectionId;
         $this->newField = [];
         $this->resetValidation();
@@ -190,19 +196,17 @@ new #[Title('vMix Data')] class extends Component
     }
 
     /**
-     * Open this run-of-show entry's fields, or close it if it is already open.
+     * Open or close this run-of-show entry's accordion. Only the arrow should call this.
      */
     public function toggleSection(int $sectionId): void
     {
-        if ($this->selectedSectionId === $sectionId) {
-            $this->selectedSectionId = null;
-            $this->newField = [];
-            $this->resetValidation();
-            $this->loadSection();
+        if ($this->expandedSectionId === $sectionId) {
+            $this->expandedSectionId = null;
 
             return;
         }
 
+        $this->expandedSectionId = $sectionId;
         $this->selectSection($sectionId);
     }
 
@@ -524,6 +528,10 @@ new #[Title('vMix Data')] class extends Component
             if ($this->selectedSectionId === $section->id) {
                 $this->selectedSectionId = $this->firstSectionId();
             }
+
+            if ($this->expandedSectionId === $section->id) {
+                $this->expandedSectionId = null;
+            }
         } else {
             $section->update(['show_order' => null]);
         }
@@ -564,6 +572,7 @@ new #[Title('vMix Data')] class extends Component
     public function deleteSection(): void
     {
         $this->section?->deleteWithFiles();
+        $this->expandedSectionId = null;
         $this->selectedSectionId = $this->firstSectionId();
         $this->loadSection();
     }
@@ -976,13 +985,14 @@ new #[Title('vMix Data')] class extends Component
 
         @php($currentEntry = $this->currentEntry)
         @php($upNext = $this->upNext)
-        <div class="flex min-w-0 items-center gap-2 rounded bg-slate-900 px-2 py-1 ring-1 ring-slate-800">
-            <span class="shrink-0 text-[9px] font-black tracking-[0.16em] text-slate-500 uppercase">Now</span>
-            @if ($currentEntry?->on_air)
-                <span class="shrink-0 rounded bg-red-600 px-1 py-px text-[9px] font-black tracking-wide">ON AIR</span>
-            @endif
+        <div @class([
+            'flex min-w-0 items-center gap-2 rounded px-2 py-1',
+            'bg-red-600 text-white' => $currentEntry,
+            'bg-slate-900 ring-1 ring-slate-800' => ! $currentEntry,
+        ])>
+            <span @class(['shrink-0 text-[9px] font-black tracking-[0.16em] uppercase', 'text-red-100' => $currentEntry, 'text-slate-500' => ! $currentEntry])>Now</span>
             @if ($currentEntry)
-                <button type="button" wire:click="selectSection({{ $currentEntry->id }})" class="min-w-0 truncate text-left text-sm font-black hover:text-amber-300">{{ $currentEntry->name }}</button>
+                <button type="button" wire:click="selectSection({{ $currentEntry->id }})" class="min-w-0 truncate text-left text-sm font-black hover:text-red-100">{{ $currentEntry->name }}</button>
             @else
                 <span class="truncate text-sm font-black text-slate-600">Nothing current</span>
             @endif
@@ -1166,7 +1176,7 @@ new #[Title('vMix Data')] class extends Component
     </aside>
 
     <div class="min-w-0 flex-1 space-y-4">
-        {{-- Run of show --}}
+        {{-- Run of show accordion --}}
         <div class="rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
             <div class="flex items-center gap-2 border-b border-slate-200 px-4 py-3">
                 <h2 class="flex-1 text-sm font-bold tracking-wide text-slate-500 uppercase">Run of show</h2>
@@ -1174,65 +1184,91 @@ new #[Title('vMix Data')] class extends Component
                 <button type="button" wire:click="showNext" title="Take the current item off air and put the next one on" class="rounded-md bg-red-600 px-3 py-1.5 text-xs font-black text-white hover:bg-red-500">Next &#9654;</button>
             </div>
 
+            @php($focusId = $expandedSectionId ?? ($this->runOfShow->contains('id', $selectedSectionId) ? $selectedSectionId : $this->currentItemId))
             <nav wire:sort="sortItems" wire:sort:config="{ group: { name: 'run-of-show', pull: false, put: true } }" class="min-h-40 space-y-1 p-3">
                 @forelse ($this->runOfShow as $index => $item)
+                    @php($isLive = $this->currentItemId === $item->id)
+                    @php($isOpen = $expandedSectionId === $item->id)
                     <div
+                        id="ros-{{ $item->id }}"
                         wire:key="item-{{ $item->id }}"
                         wire:sort:item="{{ $item->id }}"
+                        @if ($focusId === $item->id) x-init="$nextTick(() => $el.scrollIntoView({ block: 'nearest' }))" @endif
                         @class([
                             'overflow-hidden rounded-lg',
-                            'bg-amber-50 ring-2 ring-amber-400' => $selectedSectionId === $item->id,
-                            'hover:bg-slate-50 ring-1 ring-transparent' => $selectedSectionId !== $item->id,
-                            'ring-2 ring-red-500' => $this->currentItemId === $item->id && $selectedSectionId !== $item->id,
+                            'bg-red-50 ring-2 ring-red-600' => $isLive,
+                            'bg-amber-50 ring-2 ring-amber-400' => $isOpen && ! $isLive,
+                            'hover:bg-slate-50 ring-1 ring-transparent' => ! $isOpen && ! $isLive,
                         ])
                     >
-                        <div @class(['flex items-center gap-2 px-2 py-1', 'bg-amber-400 text-slate-900' => $selectedSectionId === $item->id])>
-                        <span wire:sort:handle title="Drag to reorder" class="cursor-grab px-1 text-base text-slate-400 select-none hover:text-slate-700">&#10303;</span>
-                        <span @class(['w-8 shrink-0 text-center font-mono text-sm font-black tabular-nums', 'text-slate-900' => $selectedSectionId === $item->id, 'text-slate-400' => $selectedSectionId !== $item->id])>{{ sprintf('%02d', $index + 1) }}</span>
-                        <button
-                            type="button"
-                            x-data="{ clickTimer: null }"
-                            x-on:click="clearTimeout(clickTimer); clickTimer = setTimeout(() => $wire.toggleSection({{ $item->id }}), 300)"
-                            x-on:dblclick.prevent="clearTimeout(clickTimer); $wire.goLive({{ $item->id }})"
-                            title="Click to open. Double-click to put on air."
-                            class="min-w-0 flex-1 py-2 pr-2 text-left"
-                        >
-                            <span class="flex items-center gap-2">
-                                <span @class(['inline-block text-[10px] leading-none transition-transform', 'rotate-90' => $selectedSectionId === $item->id])>&#9654;</span>
-                                <span class="min-w-0">
-                                    <span class="block truncate text-base font-black">{{ $item->name }}</span>
-                                    <span @class(['block truncate text-xs font-semibold uppercase', 'text-slate-700' => $selectedSectionId === $item->id, 'text-slate-400' => $selectedSectionId !== $item->id])>{{ $item->runOfShowLabel() }}</span>
-                                    @include('pages.vmix-description-bullets', [
-                                        'lines' => $item->descriptionLines(),
-                                        'class' => $selectedSectionId === $item->id ? 'mt-1 text-xs font-normal normal-case text-slate-700' : 'mt-1 text-xs font-normal normal-case text-slate-500',
-                                    ])
-                                </span>
-                            </span>
-                        </button>
-                        @unless ($item->isItem())
+                        <div @class([
+                            'flex items-center gap-2 px-2 py-1',
+                            'bg-red-600 text-white' => $isLive,
+                            'bg-amber-400 text-slate-900' => $isOpen && ! $isLive,
+                        ])>
+                            <span wire:sort:handle title="Drag to reorder" @class(['cursor-grab px-1 text-base select-none', 'text-white/70 hover:text-white' => $isLive, 'text-slate-400 hover:text-slate-700' => ! $isLive])>&#10303;</span>
                             <button
                                 type="button"
-                                wire:click="removeFromRunOfShow({{ $item->id }})"
-                                @if ($item->isBreak() || $item->isPlaceholder()) wire:confirm="Delete {{ $item->name }}?" @endif
-                                title="{{ match (true) { $item->isBreak() => 'Delete this break', $item->isPlaceholder() => 'Delete this placeholder', default => 'Remove from the run of show (keeps the section and its on-air state)' } }}"
-                                class="shrink-0 rounded px-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                            >&times;</button>
-                        @endunless
-                        @unless ($item->isPlaceholder())
-                        <button
-                            type="button"
-                            wire:click="toggleOnAir({{ $item->id }})"
-                            title="{{ $item->on_air ? 'Take off air' : ($item->isItem() ? 'Put on air (takes other '.$item->template->name.' items off)' : 'Put on air') }}"
-                            @class([
-                                'shrink-0 rounded px-2 py-0.5 text-[10px] font-black tracking-wide',
-                                'bg-red-600 text-white' => $item->on_air,
-                                'bg-slate-200 text-slate-500 hover:bg-slate-300' => ! $item->on_air,
-                            ])
-                        >{{ $item->on_air ? ($item->isBreak() ? 'ON' : 'ON AIR') : 'OFF' }}</button>
-                        @endunless
+                                wire:click="toggleSection({{ $item->id }})"
+                                title="{{ $isOpen ? 'Hide details' : 'Show details' }}"
+                                @class(['shrink-0 rounded px-1 py-2', 'text-white/80 hover:bg-black/20 hover:text-white' => $isLive, 'text-slate-500 hover:bg-black/10 hover:text-slate-800' => ! $isLive])
+                            >
+                                <span @class(['inline-block text-[10px] leading-none transition-transform', 'rotate-90' => $isOpen])>&#9654;</span>
+                            </button>
+                            <span @class([
+                                'w-8 shrink-0 text-center font-mono text-sm font-black tabular-nums',
+                                'text-white' => $isLive,
+                                'text-slate-900' => $isOpen && ! $isLive,
+                                'text-slate-400' => ! $isOpen && ! $isLive,
+                            ])>{{ sprintf('%02d', $index + 1) }}</span>
+                            <button
+                                type="button"
+                                x-on:dblclick.prevent="$wire.goLive({{ $item->id }})"
+                                title="Double-click to put on air. Use the arrow to open details."
+                                class="min-w-0 flex-1 py-2 pr-2 text-left"
+                            >
+                                <span class="min-w-0">
+                                    <span class="block truncate text-base font-black">{{ $item->name }}</span>
+                                    <span @class([
+                                        'block truncate text-xs font-semibold uppercase',
+                                        'text-red-100' => $isLive,
+                                        'text-slate-700' => $isOpen && ! $isLive,
+                                        'text-slate-400' => ! $isOpen && ! $isLive,
+                                    ])>{{ $item->runOfShowLabel() }}</span>
+                                    @include('pages.vmix-description-bullets', [
+                                        'lines' => $item->descriptionLines(),
+                                        'class' => $isLive
+                                            ? 'mt-1 text-xs font-normal normal-case text-red-100'
+                                            : ($isOpen ? 'mt-1 text-xs font-normal normal-case text-slate-700' : 'mt-1 text-xs font-normal normal-case text-slate-500'),
+                                    ])
+                                </span>
+                            </button>
+                            @unless ($item->isItem())
+                                <button
+                                    type="button"
+                                    wire:click="removeFromRunOfShow({{ $item->id }})"
+                                    @if ($item->isBreak() || $item->isPlaceholder()) wire:confirm="Delete {{ $item->name }}?" @endif
+                                    title="{{ match (true) { $item->isBreak() => 'Delete this break', $item->isPlaceholder() => 'Delete this placeholder', default => 'Remove from the run of show (keeps the section and its on-air state)' } }}"
+                                    @class(['shrink-0 rounded px-1', 'text-white/70 hover:bg-black/20 hover:text-white' => $isLive, 'text-slate-400 hover:bg-red-50 hover:text-red-600' => ! $isLive])
+                                >&times;</button>
+                            @endunless
+                            @unless ($item->isPlaceholder())
+                            <button
+                                type="button"
+                                wire:click="toggleOnAir({{ $item->id }})"
+                                title="{{ $item->on_air ? 'Take off air' : ($item->isItem() ? 'Put on air (takes other '.$item->template->name.' items off)' : 'Put on air') }}"
+                                @class([
+                                    'shrink-0 rounded px-2 py-0.5 text-[10px] font-black tracking-wide',
+                                    'bg-red-800 text-white hover:bg-red-950' => $item->on_air && $isLive,
+                                    'bg-red-600 text-white' => $item->on_air && ! $isLive,
+                                    'bg-black/20 text-white hover:bg-black/30' => ! $item->on_air && $isLive,
+                                    'bg-slate-200 text-slate-500 hover:bg-slate-300' => ! $item->on_air && ! $isLive,
+                                ])
+                            >{{ $item->on_air ? ($item->isBreak() ? 'ON' : 'ON AIR') : 'OFF' }}</button>
+                            @endunless
                         </div>
-                        @if ($selectedSectionId === $item->id && ($section = $this->section))
-                            <div wire:sort:ignore class="border-t border-amber-300/60 bg-white p-3">
+                        @if ($isOpen && ($section = $this->section) && $section->id === $item->id)
+                            <div wire:sort:ignore @class(['border-t bg-white p-3', 'border-red-300' => $isLive, 'border-amber-300/60' => ! $isLive])>
                                 @include('pages.vmix-section-editor', ['section' => $section])
                             </div>
                         @endif
@@ -1241,7 +1277,6 @@ new #[Title('vMix Data')] class extends Component
                     <p class="px-2 py-8 text-center text-sm text-slate-400">Nothing in the run of show yet. Add an item or break on the left, or drag a section here.</p>
                 @endforelse
             </nav>
-
         </div>
 
     {{-- Selected section --}}
