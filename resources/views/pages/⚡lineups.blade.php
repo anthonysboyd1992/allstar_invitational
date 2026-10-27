@@ -43,7 +43,7 @@ new #[Title('Races & Lineups')] class extends Component
     #[Computed]
     public function roster(): Collection
     {
-        return Competitor::sortByCarNumber(Competitor::query()
+        return Competitor::query()
             ->withCount('entries')
             ->when($this->search !== '', function ($query): void {
                 $term = '%'.$this->search.'%';
@@ -52,7 +52,9 @@ new #[Title('Races & Lineups')] class extends Component
                     ->orWhere('last_name', 'like', $term)
                     ->orWhere('car_number', 'like', $term));
             })
-            ->get());
+            ->get()
+            ->sortBy('car_number', SORT_NATURAL | SORT_FLAG_CASE)
+            ->values();
     }
 
     #[Computed]

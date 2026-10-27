@@ -95,7 +95,7 @@ new #[Title('vMix Data')] class extends Component
     #[Computed]
     public function drivers(): Collection
     {
-        return Competitor::sortByCarNumber(Competitor::query()->get(['id', 'car_number', 'first_name', 'last_name', 'headshot_path']));
+        return Competitor::query()->orderBy('last_name')->orderBy('first_name')->get(['id', 'car_number', 'first_name', 'last_name', 'headshot_path']);
     }
 
     #[Computed]

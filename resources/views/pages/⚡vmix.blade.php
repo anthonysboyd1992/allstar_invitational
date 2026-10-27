@@ -79,7 +79,7 @@ new #[Title('vMix')] class extends Component
     #[Computed]
     public function drivers(): Collection
     {
-        return Competitor::sortByCarNumber(Competitor::query()->get());
+        return Competitor::query()->get()->sortBy('car_number', SORT_NATURAL | SORT_FLAG_CASE)->values();
     }
 
     /**

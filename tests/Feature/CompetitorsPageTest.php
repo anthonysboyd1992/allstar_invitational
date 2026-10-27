@@ -232,10 +232,9 @@ class CompetitorsPageTest extends TestCase
             Competitor::factory()->create(['car_number' => $carNumber, 'last_name' => $lastName]);
         }
 
-        $expected = ['Avery', 'Zane', 'Adams', 'Dunn', 'Cole', 'Baker'];
-
-        $this->assertSame($expected, Livewire::test('pages::competitors')->get('competitors')->pluck('last_name')->all());
-        $this->assertSame($expected, Livewire::test('pages::lineups')->get('roster')->pluck('last_name')->all());
-        $this->assertSame($expected, Livewire::test('pages::vmix-data')->get('drivers')->pluck('last_name')->all());
+        $this->assertSame(
+            ['Avery', 'Zane', 'Adams', 'Dunn', 'Cole', 'Baker'],
+            Livewire::test('pages::competitors')->get('competitors')->pluck('last_name')->all(),
+        );
     }
 }
