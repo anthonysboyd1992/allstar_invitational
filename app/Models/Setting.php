@@ -16,6 +16,12 @@ class Setting extends Model
 
     public const DriverMode = 'driver_mode';
 
+    public const DriversPerDataset = 'lineup_drivers_per_dataset';
+
+    public const DefaultDriversPerDataset = 12;
+
+    public const MaxDriversPerDataset = 50;
+
     public static function get(string $key, ?string $default = null): ?string
     {
         return static::query()->where('key', $key)->value('value') ?? $default;
@@ -31,6 +37,16 @@ class Setting extends Model
         $id = static::get(self::ActiveRace);
 
         return $id ? Race::query()->with(['raceType', 'entries.competitor'])->find($id) : null;
+    }
+
+    /**
+     * How many drivers go in each dataset (page) of the vMix lineup feed.
+     */
+    public static function driversPerDataset(): int
+    {
+        $count = (int) static::get(self::DriversPerDataset, (string) self::DefaultDriversPerDataset);
+
+        return $count >= 1 && $count <= self::MaxDriversPerDataset ? $count : self::DefaultDriversPerDataset;
     }
 
     public static function activeDriver(): ?Competitor

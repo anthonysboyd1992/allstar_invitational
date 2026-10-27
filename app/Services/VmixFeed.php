@@ -19,7 +19,7 @@ class VmixFeed
         $race ??= Setting::activeRace();
         $className = $this->className();
         $competitors = $race ? $race->entries->pluck('competitor')->filter()->values() : collect();
-        $perPage = config('vmix.slots_per_page');
+        $perPage = Setting::driversPerDataset();
         $pages = $competitors->chunk($perPage)->map->values();
 
         if ($pages->isEmpty()) {

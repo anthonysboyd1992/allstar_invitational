@@ -6,8 +6,10 @@ use App\Models\Competitor;
 use App\Models\Race;
 use App\Models\RaceType;
 use App\Models\Setting;
+use App\Models\User;
 use App\Services\VmixFeed;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 class VmixFeedTest extends TestCase
@@ -67,6 +69,32 @@ class VmixFeedTest extends TestCase
         $this->assertSame('13', $pages[1]['StartPos1']);
         $this->assertArrayNotHasKey('Row1.Text', $pages[0]);
         $this->assertArrayNotHasKey('Row1Box.Source', $pages[0]);
+    }
+
+    public function test_drivers_per_dataset_can_be_changed_on_the_vmix_page(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $race = Race::factory()->create();
+        $race->syncLineup(Competitor::factory()->count(14)->create()->pluck('id')->all());
+        Setting::put(Setting::ActiveRace, (string) $race->id);
+
+        $component = Livewire::test('pages::vmix')
+            ->assertSet('driversPerDataset', '12')
+            ->set('driversPerDataset', '6')
+            ->assertSet('driversPerDataset', '6');
+
+        $pages = $this->getJson(route('feeds.lineup'))->json('Lineup');
+        $this->assertCount(3, $pages);
+        $this->assertSame(3, $pages[2]['TotalPages']);
+        $this->assertSame('13', $pages[2]['StartPos1']);
+        $this->assertSame('', $pages[2]['StartPos3']);
+        $this->assertArrayHasKey('Number6.Text', $pages[0]);
+        $this->assertArrayNotHasKey('Number7.Text', $pages[0]);
+
+        $component->set('driversPerDataset', '0')
+            ->assertSet('driversPerDataset', '6')
+            ->assertDispatched('notify');
+        $this->assertSame(6, Setting::driversPerDataset());
     }
 
     public function test_lineup_feed_leaves_out_accolades(): void

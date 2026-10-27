@@ -8,6 +8,4 @@ return [
 
     'headshot_height' => (int) env('VMIX_HEADSHOT_HEIGHT', 256),
 
-    'slots_per_page' => 12,
-
 ];

@@ -5,6 +5,7 @@ use App\Models\RaceType;
 use App\Models\Setting;
 use App\Services\VmixFeed;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Validator;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -25,12 +26,15 @@ new #[Title('vMix')] class extends Component
 
     public string $driverMode = 'name_only';
 
+    public string $driversPerDataset = '';
+
     public function mount(): void
     {
         $this->activeRaceId = (string) Setting::get(Setting::ActiveRace);
         $this->activeDriverId = (string) Setting::get(Setting::ActiveDriver);
         $this->className = (string) Setting::get(Setting::ClassName);
         $this->driverMode = (string) Setting::get(Setting::DriverMode, 'name_only');
+        $this->driversPerDataset = (string) Setting::driversPerDataset();
     }
 
     public function updatedActiveRaceId(string $value): void
@@ -68,6 +72,19 @@ new #[Title('vMix')] class extends Component
     public function updatedDriverMode(string $value): void
     {
         Setting::put(Setting::DriverMode, trim($value) ?: 'name_only');
+    }
+
+    public function updatedDriversPerDataset(string $value): void
+    {
+        $validator = Validator::make(['count' => $value], ['count' => ['required', 'integer', 'min:1', 'max:'.Setting::MaxDriversPerDataset]]);
+
+        if ($validator->fails()) {
+            $this->dispatch('notify', message: 'Drivers per dataset must be between 1 and '.Setting::MaxDriversPerDataset.'.', type: 'error');
+        } else {
+            Setting::put(Setting::DriversPerDataset, (string) (int) $value);
+        }
+
+        $this->driversPerDataset = (string) Setting::driversPerDataset();
     }
 
     #[Computed]
@@ -115,6 +132,32 @@ new #[Title('vMix')] class extends Component
                             @endforeach
                         </select>
                     </label>
+                    <div>
+                        <span class="text-xs font-semibold text-slate-500">Drivers per dataset</span>
+                        <div class="mt-0.5 flex items-center gap-1">
+                            @foreach ([6, 12] as $preset)
+                                <button
+                                    type="button"
+                                    wire:click="$set('driversPerDataset', '{{ $preset }}')"
+                                    @class([
+                                        'rounded-md px-3 py-2 text-sm font-bold',
+                                        'bg-amber-400 text-slate-900' => $driversPerDataset === (string) $preset,
+                                        'bg-slate-100 text-slate-600 hover:bg-slate-200' => $driversPerDataset !== (string) $preset,
+                                    ])
+                                >{{ $preset }}</button>
+                            @endforeach
+                            <input
+                                type="number"
+                                min="1"
+                                max="{{ Setting::MaxDriversPerDataset }}"
+                                wire:model.blur="driversPerDataset"
+                                x-on:keydown.enter.prevent="$el.blur()"
+                                aria-label="Custom drivers per dataset"
+                                class="w-20 rounded-md border border-slate-300 px-2 py-2 text-sm"
+                            >
+                        </div>
+                        <span class="mt-0.5 block text-xs text-slate-400">Each dataset has this many driver slots (Number1&ndash;Number{{ $driversPerDataset }}). Bigger fields roll onto the next dataset.</span>
+                    </div>
                     <label class="block">
                         <span class="text-xs font-semibold text-slate-500">Class (used in Class.Text, Event.Text and DriverKey)</span>
                         <input wire:model.live.debounce.400ms="className" placeholder="e.g. IMCA Modified" class="mt-0.5 block w-full rounded-md border border-slate-300 px-2 py-2 text-sm">
