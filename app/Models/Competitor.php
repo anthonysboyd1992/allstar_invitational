@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Services\ImageCropper;
+use App\Services\MediaStorage;
 use Database\Factories\CompetitorFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -10,7 +11,6 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use RuntimeException;
 
@@ -19,8 +19,6 @@ class Competitor extends Model
 {
     /** @use HasFactory<CompetitorFactory> */
     use HasFactory;
-
-    public const HeadshotDisk = 'public';
 
     public const HeadshotDirectory = 'headshots';
 
@@ -51,7 +49,7 @@ class Competitor extends Model
      */
     public function headshotUrl(): ?string
     {
-        return $this->headshot_path ? asset('storage/'.$this->headshot_path) : null;
+        return $this->headshot_path ? MediaStorage::url($this->headshot_path) : null;
     }
 
     /**
@@ -64,7 +62,7 @@ class Competitor extends Model
             config('vmix.headshot_width'),
             config('vmix.headshot_height'),
             self::HeadshotDirectory,
-            self::HeadshotDisk,
+            MediaStorage::diskName(),
         );
 
         $this->deleteHeadshot();
@@ -74,7 +72,7 @@ class Competitor extends Model
     public function deleteHeadshot(): void
     {
         if ($this->headshot_path) {
-            Storage::disk(self::HeadshotDisk)->delete($this->headshot_path);
+            MediaStorage::disk()->delete($this->headshot_path);
         }
 
         $this->forceFill(['headshot_path' => null]);

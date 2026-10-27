@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Services\ImageCropper;
+use App\Services\MediaStorage;
 use App\Services\VmixFeed;
 use Database\Factories\VmixFieldFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -11,7 +12,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Storage;
 
 /**
  * A field has two values: "value" is what is being edited and "live_value" is what the feed sends to vMix.
@@ -29,14 +29,18 @@ class VmixField extends Model
 
     public const TypeDriver = 'driver';
 
-    public const Types = [self::TypeText => 'Text', self::TypeImage => 'Image', self::TypeDriver => 'Driver'];
+    public const TypeColor = 'color';
+
+    public const Types = [self::TypeText => 'Text', self::TypeImage => 'Image', self::TypeDriver => 'Driver', self::TypeColor => 'Color'];
+
+    public const ColorPattern = '/^#[0-9A-Fa-f]{6}$/';
+
+    public const DefaultColor = '#FFFFFF';
 
     /**
      * Keys a driver field expands to in the feed, as "{field key}_{suffix}".
      */
     public const DriverKeySuffixes = ['number', 'name', 'first_name', 'last_name', 'hometown', 'accolades', 'headshot'];
-
-    public const ImageDisk = 'public';
 
     public const ImageDirectory = 'vmix';
 
@@ -74,6 +78,11 @@ class VmixField extends Model
     public function isDriver(): bool
     {
         return $this->type === self::TypeDriver;
+    }
+
+    public function isColor(): bool
+    {
+        return $this->type === self::TypeColor;
     }
 
     /**
@@ -124,7 +133,7 @@ class VmixField extends Model
     {
         $path = func_num_args() ? $path : $this->value;
 
-        return $this->isImage() && filled($path) ? asset('storage/'.$path) : null;
+        return $this->isImage() && filled($path) ? MediaStorage::url($path) : null;
     }
 
     /**
@@ -174,7 +183,7 @@ class VmixField extends Model
     {
         $croppedPath = $this->cropFrom($upload->getRealPath());
 
-        $this->saveValue($croppedPath, ['original_path' => $upload->store(self::ImageDirectory.'/originals', self::ImageDisk)]);
+        $this->saveValue($croppedPath, ['original_path' => $upload->store(self::ImageDirectory.'/originals', MediaStorage::diskName())]);
     }
 
     /**
@@ -184,11 +193,10 @@ class VmixField extends Model
     {
         $this->update(['width' => $width, 'height' => $height]);
 
-        $disk = Storage::disk(self::ImageDisk);
-        $sourcePath = collect([$this->original_path, $this->value])->first(fn (?string $path) => filled($path) && $disk->exists($path));
+        $sourcePath = collect([$this->original_path, $this->value])->first(fn (?string $path) => filled($path) && MediaStorage::disk()->exists($path));
 
         if ($this->isImage() && $sourcePath) {
-            $this->saveValue($this->cropFrom($disk->path($sourcePath)));
+            $this->saveValue(MediaStorage::withLocalCopy($sourcePath, fn (string $localPath) => $this->cropFrom($localPath)));
         }
     }
 
@@ -203,7 +211,7 @@ class VmixField extends Model
     public function deleteImageFiles(): void
     {
         if ($this->isImage()) {
-            Storage::disk(self::ImageDisk)->delete($this->imagePaths());
+            MediaStorage::disk()->delete($this->imagePaths());
         }
     }
 
@@ -223,7 +231,7 @@ class VmixField extends Model
         $unused = array_diff($paths, $this->imagePaths());
 
         if ($unused !== []) {
-            Storage::disk(self::ImageDisk)->delete(array_values($unused));
+            MediaStorage::disk()->delete(array_values($unused));
         }
     }
 
@@ -234,7 +242,7 @@ class VmixField extends Model
             $this->width ?: self::DefaultWidth,
             $this->height ?: self::DefaultHeight,
             self::ImageDirectory,
-            self::ImageDisk,
+            MediaStorage::diskName(),
         );
     }
 }

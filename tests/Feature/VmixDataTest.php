@@ -454,4 +454,47 @@ class VmixDataTest extends TestCase
 
         $this->assertSame('{}', $this->get(route('feeds.data'))->assertOk()->getContent());
     }
+
+    public function test_color_fields_save_hex_values_live(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $section = VmixSection::factory()->onAir()->create(['key' => 'theme']);
+        $group = VmixGroup::factory()->for($section, 'section')->create();
+
+        $component = Livewire::test('pages::vmix-data', ['selectedSectionId' => $section->id])
+            ->set("newField.{$group->id}.key", 'accent')
+            ->set("newField.{$group->id}.type", 'color')
+            ->set("newField.{$group->id}.value", 'not-a-color')
+            ->call('addField', $group->id)
+            ->assertHasErrors("newField.{$group->id}.key")
+            ->set("newField.{$group->id}.value", '#ff6600')
+            ->call('addField', $group->id)
+            ->assertHasNoErrors();
+
+        $field = $group->fields()->sole();
+        $this->assertSame([VmixField::TypeColor, '#FF6600', '#FF6600', false], [$field->type, $field->value, $field->live_value, $field->needs_update]);
+
+        $component
+            ->set("fieldValues.{$field->id}", '#00aa33')
+            ->assertSet("fieldValues.{$field->id}", '#00AA33')
+            ->set("fieldValues.{$field->id}", 'red')
+            ->assertSet("fieldValues.{$field->id}", '#00AA33')
+            ->assertDispatched('notify');
+
+        $this->getJson(route('feeds.data'))->assertExactJson(['theme' => [['accent' => '#00AA33']]]);
+    }
+
+    public function test_new_color_fields_default_to_white(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $group = VmixGroup::factory()->create();
+
+        Livewire::test('pages::vmix-data', ['selectedSectionId' => $group->vmix_section_id])
+            ->set("newField.{$group->id}.key", 'background')
+            ->set("newField.{$group->id}.type", 'color')
+            ->call('addField', $group->id)
+            ->assertHasNoErrors();
+
+        $this->assertSame(VmixField::DefaultColor, $group->fields()->sole()->value);
+    }
 }

@@ -248,11 +248,15 @@ new #[Title('vMix Data')] class extends Component
                     fn (string $attribute, mixed $value, Closure $fail) => $this->section->hasFieldKey($key) ? $fail('This section already has a field with that name.') : null,
                 ],
                 'type' => ['required', 'in:'.implode(',', array_keys(VmixField::Types))],
-                'value' => ['nullable', 'string', 'max:5000', ...($type === VmixField::TypeDriver ? ['exists:competitors,id'] : [])],
+                'value' => [
+                    'nullable', 'string', 'max:5000',
+                    ...($type === VmixField::TypeDriver ? ['exists:competitors,id'] : []),
+                    ...($type === VmixField::TypeColor ? ['regex:'.VmixField::ColorPattern] : []),
+                ],
                 'width' => $sizeRules,
                 'height' => $sizeRules,
             ],
-            ['key.regex' => 'Field names can only use letters, numbers, _ . and -'],
+            ['key.regex' => 'Field names can only use letters, numbers, _ . and -', 'value.regex' => 'Colors must be a hex value like #FF0000.'],
             ['key' => 'field name'],
         );
 
@@ -263,7 +267,8 @@ new #[Title('vMix Data')] class extends Component
         }
 
         $value = $isImage || ($input['value'] ?? '') === '' ? null : $input['value'];
-        $needsUpdate = $type !== VmixField::TypeText;
+        $value = $type === VmixField::TypeColor ? strtoupper($value ?? VmixField::DefaultColor) : $value;
+        $needsUpdate = in_array($type, [VmixField::TypeImage, VmixField::TypeDriver], true);
 
         $group->fields()->create([
             'key' => $key,
@@ -288,8 +293,10 @@ new #[Title('vMix Data')] class extends Component
 
         if ($field->isDriver() && $value !== null && ! Competitor::query()->whereKey((int) $value)->exists()) {
             $this->dispatch('notify', message: 'That driver no longer exists.', type: 'error');
+        } elseif ($field->isColor() && $value !== null && ! preg_match(VmixField::ColorPattern, $value)) {
+            $this->dispatch('notify', message: 'Colors must be a hex value like #FF0000.', type: 'error');
         } elseif (! $field->isImage()) {
-            $field->saveValue($value);
+            $field->saveValue($field->isColor() && $value !== null ? strtoupper($value) : $value);
         }
 
         unset($this->section);
@@ -642,6 +649,23 @@ new #[Title('vMix Data')] class extends Component
                                             </select>
                                             <span class="shrink-0 font-mono text-[10px] text-slate-400" title="{{ collect(VmixField::DriverKeySuffixes)->map(fn ($suffix) => $field->key.'_'.$suffix)->implode(', ') }}">{{ $field->key }}_*</span>
                                         </div>
+                                    @elseif ($field->isColor())
+                                        <div class="flex min-w-0 flex-1 items-center gap-2 rounded border border-slate-200 px-1.5 py-1">
+                                            <input
+                                                type="color"
+                                                wire:model.live.debounce.150ms="fieldValues.{{ $field->id }}"
+                                                aria-label="Pick a color for {{ $field->key }}"
+                                                class="h-7 w-10 shrink-0 cursor-pointer rounded border border-slate-200 bg-white p-0.5"
+                                            >
+                                            <input
+                                                wire:model.blur="fieldValues.{{ $field->id }}"
+                                                x-on:keydown.enter.prevent="$el.blur()"
+                                                placeholder="#FFFFFF"
+                                                maxlength="7"
+                                                aria-label="Hex value for {{ $field->key }}"
+                                                class="w-24 rounded border border-slate-200 px-1.5 py-0.5 font-mono text-sm uppercase focus:border-amber-500 focus:outline-none"
+                                            >
+                                        </div>
                                     @else
                                         <input
                                             wire:model.live.debounce.250ms="fieldValues.{{ $field->id }}"
@@ -682,6 +706,9 @@ new #[Title('vMix Data')] class extends Component
                                         @elseif ($field->isDriver())
                                             @php($liveDriver = $this->drivers->firstWhere('id', (int) $field->live_value))
                                             <span class="font-semibold text-slate-700">{{ $liveDriver ? ($liveDriver->car_number ? '#'.$liveDriver->car_number.' ' : '').$liveDriver->full_name : 'No driver' }}</span>
+                                        @elseif ($field->isColor() && filled($field->live_value))
+                                            <span class="size-4 rounded ring-1 ring-slate-300" style="background-color: {{ $field->live_value }}"></span>
+                                            <span class="font-mono font-semibold text-slate-700">{{ $field->live_value }}</span>
                                         @else
                                             <span class="truncate font-semibold text-slate-700">{{ filled($field->live_value) ? $field->live_value : '(blank)' }}</span>
                                         @endif
@@ -714,6 +741,11 @@ new #[Title('vMix Data')] class extends Component
                                             <option value="{{ $option->id }}">{{ $option->car_number ? '#'.$option->car_number.' ' : '' }}{{ $option->full_name }}</option>
                                         @endforeach
                                     </select>
+                                @elseif (($newField[$group->id]['type'] ?? VmixField::TypeText) === VmixField::TypeColor)
+                                    <div class="flex min-w-0 flex-1 items-center gap-1">
+                                        <input type="color" wire:model.live="newField.{{ $group->id }}.value" value="{{ VmixField::DefaultColor }}" aria-label="Color" class="h-7 w-10 shrink-0 cursor-pointer rounded border border-dashed border-slate-300 bg-white p-0.5">
+                                        <input wire:model="newField.{{ $group->id }}.value" placeholder="{{ VmixField::DefaultColor }}" maxlength="7" aria-label="Hex value" class="w-24 rounded border border-dashed border-slate-300 px-1.5 py-1 font-mono text-sm uppercase focus:border-amber-500 focus:outline-none">
+                                    </div>
                                 @else
                                     <input wire:model="newField.{{ $group->id }}.value" placeholder="Value" class="min-w-0 flex-1 rounded border border-dashed border-slate-300 px-1.5 py-1 text-sm focus:border-amber-500 focus:outline-none">
                                 @endif
