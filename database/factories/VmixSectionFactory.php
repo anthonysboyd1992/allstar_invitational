@@ -27,6 +27,19 @@ class VmixSectionFactory extends Factory
         ];
     }
 
+    public function template(): static
+    {
+        return $this->state(fn (array $attributes) => ['is_template' => true]);
+    }
+
+    /**
+     * A run-of-show item of the given template, without copied structure. Use VmixSection::createItem() to copy groups and fields.
+     */
+    public function itemOf(VmixSection $template): static
+    {
+        return $this->state(fn (array $attributes) => ['template_id' => $template->id, 'show_order' => VmixSection::nextShowOrder()]);
+    }
+
     public function onAir(): static
     {
         return $this->state(fn (array $attributes) => ['on_air' => true]);

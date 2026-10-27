@@ -10,14 +10,16 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 
 /**
  * A field has two values: "value" is what is being edited and "live_value" is what the feed sends to vMix.
  * Fields set to "needs_update" only copy value to live_value when Update is pushed; the rest go live as they save.
  */
-#[Fillable(['vmix_group_id', 'key', 'type', 'value', 'live_value', 'needs_update', 'width', 'height', 'original_path', 'sort_order'])]
+#[Fillable(['vmix_group_id', 'template_field_id', 'key', 'type', 'value', 'live_value', 'needs_update', 'width', 'height', 'original_path', 'sort_order'])]
 class VmixField extends Model
 {
     /** @use HasFactory<VmixFieldFactory> */
@@ -68,6 +70,16 @@ class VmixField extends Model
     public function group(): BelongsTo
     {
         return $this->belongsTo(VmixGroup::class, 'vmix_group_id');
+    }
+
+    /**
+     * The same field in every run-of-show item made from this template field.
+     *
+     * @return HasMany<VmixField, $this>
+     */
+    public function copies(): HasMany
+    {
+        return $this->hasMany(VmixField::class, 'template_field_id');
     }
 
     public function isImage(): bool
@@ -203,6 +215,41 @@ class VmixField extends Model
     public function clearImage(): void
     {
         $this->saveValue(null, ['original_path' => null]);
+    }
+
+    /**
+     * Copy this field's image files to new paths, so another field can start from them without sharing files.
+     *
+     * @return array{value: ?string, original_path: ?string}
+     */
+    public function duplicateImageFiles(): array
+    {
+        $disk = MediaStorage::disk();
+        $duplicate = function (?string $path, string $directory) use ($disk): ?string {
+            if (blank($path) || ! $disk->exists($path)) {
+                return null;
+            }
+
+            $copy = $directory.'/'.Str::random(40).'.'.pathinfo($path, PATHINFO_EXTENSION);
+            $disk->copy($path, $copy);
+
+            return $copy;
+        };
+
+        return [
+            'value' => $duplicate($this->value, self::ImageDirectory),
+            'original_path' => $duplicate($this->original_path, self::ImageDirectory.'/originals'),
+        ];
+    }
+
+    /**
+     * Delete this field, its copies in every item, and their image files.
+     */
+    public function deleteWithCopies(): void
+    {
+        $this->copies->each->deleteWithCopies();
+        $this->deleteImageFiles();
+        $this->delete();
     }
 
     /**

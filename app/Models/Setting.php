@@ -18,6 +18,11 @@ class Setting extends Model
 
     public const DriversPerDataset = 'lineup_drivers_per_dataset';
 
+    /**
+     * The vMix data run-of-show item Next / Previous step from.
+     */
+    public const ShowCurrentItem = 'vmix_show_current_item';
+
     public const DefaultDriversPerDataset = 12;
 
     public const MaxDriversPerDataset = 50;

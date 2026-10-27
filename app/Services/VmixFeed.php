@@ -72,20 +72,29 @@ class VmixFeed
     }
 
     /**
-     * The master vMix data file: one entry per on-air section, each a single row of that section's fields.
+     * The master vMix data file: each on-air standalone section under its own key, then for each template
+     * with an item on air, the template's key holding that item's single row of fields.
      *
      * @return array<string, list<array<string, string>>>
      */
     public function data(): array
     {
-        return VmixSection::query()
+        $standalone = VmixSection::query()
+            ->standalone()
             ->where('on_air', true)
             ->with('groups.fields')
-            ->orderBy('sort_order')
-            ->orderBy('id')
             ->get()
-            ->mapWithKeys(fn (VmixSection $section) => [$section->key => [$section->data()]])
-            ->all();
+            ->mapWithKeys(fn (VmixSection $section) => [$section->key => [$section->data()]]);
+
+        $items = VmixSection::query()
+            ->runOfShow()
+            ->whereNotNull('template_id')
+            ->where('on_air', true)
+            ->with(['template', 'groups.fields'])
+            ->get()
+            ->mapWithKeys(fn (VmixSection $item) => [$item->template->key => [$item->data()]]);
+
+        return $standalone->toBase()->merge($items)->all();
     }
 
     /**

@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Competitor;
+use App\Models\Setting;
 use App\Models\VmixField;
 use App\Models\VmixGroup;
 use App\Models\VmixSection;
@@ -27,6 +28,12 @@ new #[Title('vMix Data')] class extends Component
     public ?int $selectedSectionId = null;
 
     public string $newSectionName = '';
+
+    public string $newStandaloneName = '';
+
+    public string $newItemTemplateId = '';
+
+    public string $newItemName = '';
 
     public string $newGroupName = '';
 
@@ -61,7 +68,7 @@ new #[Title('vMix Data')] class extends Component
     public function mount(): void
     {
         if (! $this->selectedSectionId || ! VmixSection::query()->whereKey($this->selectedSectionId)->exists()) {
-            $this->selectedSectionId = VmixSection::query()->orderBy('sort_order')->orderBy('id')->value('id');
+            $this->selectedSectionId = $this->firstSectionId();
         }
 
         $this->loadSection();
@@ -72,7 +79,7 @@ new #[Title('vMix Data')] class extends Component
      */
     public function loadSection(): void
     {
-        unset($this->section, $this->sections);
+        unset($this->section, $this->templates, $this->runOfShow, $this->standaloneSections);
         $section = $this->section;
 
         $this->sectionName = (string) $section?->name;
@@ -87,10 +94,37 @@ new #[Title('vMix Data')] class extends Component
         $this->uploads = [];
     }
 
+    /**
+     * @return Collection<int, VmixSection>
+     */
     #[Computed]
-    public function sections(): Collection
+    public function templates(): Collection
     {
-        return VmixSection::query()->orderBy('sort_order')->orderBy('id')->get();
+        return VmixSection::query()->templates()->withCount('items')->get();
+    }
+
+    /**
+     * @return Collection<int, VmixSection>
+     */
+    #[Computed]
+    public function standaloneSections(): Collection
+    {
+        return VmixSection::query()->standalone()->get();
+    }
+
+    /**
+     * @return Collection<int, VmixSection>
+     */
+    #[Computed]
+    public function runOfShow(): Collection
+    {
+        return VmixSection::query()->runOfShow()->with('template')->get();
+    }
+
+    #[Computed]
+    public function currentItemId(): ?int
+    {
+        return ($id = Setting::get(Setting::ShowCurrentItem)) ? (int) $id : null;
     }
 
     #[Computed]
@@ -103,7 +137,7 @@ new #[Title('vMix Data')] class extends Component
     public function section(): ?VmixSection
     {
         return $this->selectedSectionId
-            ? VmixSection::query()->with('groups.fields')->find($this->selectedSectionId)
+            ? VmixSection::query()->with(['groups.fields', 'template'])->withCount('items')->find($this->selectedSectionId)
             : null;
     }
 
@@ -115,25 +149,90 @@ new #[Title('vMix Data')] class extends Component
         $this->loadSection();
     }
 
-    public function addSection(): void
+    public function addTemplate(): void
     {
         $this->newSectionName = trim($this->newSectionName);
 
         $this->validate(
             ['newSectionName' => ['required', 'string', 'max:100', 'unique:vmix_sections,name']],
-            ['newSectionName.unique' => 'There is already a section with that name.'],
-            ['newSectionName' => 'section name'],
+            ['newSectionName.unique' => 'That name is already used by a template or item.'],
+            ['newSectionName' => 'template name'],
         );
 
         $name = $this->newSectionName;
-        $section = VmixSection::query()->create([
+        $template = VmixSection::query()->create([
+            'is_template' => true,
             'name' => $name,
             'key' => VmixSection::uniqueKeyFor($name),
-            'sort_order' => (int) VmixSection::query()->max('sort_order') + 1,
+            'sort_order' => (int) VmixSection::query()->where('is_template', true)->max('sort_order') + 1,
         ]);
 
         $this->reset('newSectionName');
+        $this->selectSection($template->id);
+    }
+
+    /**
+     * Add a standalone section: its own structure, values and key in the master file.
+     */
+    public function addSection(): void
+    {
+        $this->newStandaloneName = trim($this->newStandaloneName);
+
+        $this->validate(
+            ['newStandaloneName' => ['required', 'string', 'max:100', 'unique:vmix_sections,name']],
+            ['newStandaloneName.unique' => 'That name is already used by a section, template or item.'],
+            ['newStandaloneName' => 'section name'],
+        );
+
+        $name = $this->newStandaloneName;
+        $section = VmixSection::query()->create([
+            'name' => $name,
+            'key' => VmixSection::uniqueKeyFor($name),
+            'sort_order' => (int) VmixSection::query()->standalone()->max('sort_order') + 1,
+        ]);
+
+        $this->reset('newStandaloneName');
         $this->selectSection($section->id);
+    }
+
+    /**
+     * Add to the run of show: a new item from a template (e.g. "Interview 3", the name is optional),
+     * or an existing standalone section when the picked value is "section:{id}".
+     */
+    public function addItem(): void
+    {
+        if (str_starts_with($this->newItemTemplateId, 'section:')) {
+            $section = VmixSection::query()->standalone()->findOrFail((int) substr($this->newItemTemplateId, 8));
+            $section->update(['show_order' => VmixSection::nextShowOrder()]);
+
+            $this->reset('newItemTemplateId', 'newItemName');
+            $this->resetValidation('newItemName');
+            $this->selectSection($section->id);
+
+            return;
+        }
+
+        $template = VmixSection::query()->templates()->find((int) $this->newItemTemplateId);
+
+        if (! $template) {
+            $this->addError('newItemName', 'Pick a template first.');
+
+            return;
+        }
+
+        $name = trim($this->newItemName) ?: $template->nextItemName();
+
+        if (VmixSection::query()->where('name', $name)->exists()) {
+            $this->addError('newItemName', 'That name is already used by a template or item.');
+
+            return;
+        }
+
+        $item = $template->createItem($name);
+
+        $this->reset('newItemName');
+        $this->resetValidation('newItemName');
+        $this->selectSection($item->id);
     }
 
     public function updatedSectionName(string $name): void
@@ -154,6 +253,8 @@ new #[Title('vMix Data')] class extends Component
         $section = $this->section;
         $key = trim($key);
 
+        $this->requireOwnStructure();
+
         $validator = Validator::make(['key' => $key], [
             'key' => ['required', 'max:100', 'regex:/^[A-Za-z0-9_]+$/', "unique:vmix_sections,key,{$section?->id}"],
         ], ['key.regex' => 'The JSON key can only use letters, numbers and underscores.']);
@@ -167,22 +268,81 @@ new #[Title('vMix Data')] class extends Component
         $this->loadSection();
     }
 
+    /**
+     * Put a standalone section or run-of-show item on air (an item takes its template's other items off) or take it off air.
+     */
     public function toggleOnAir(int $sectionId): void
     {
-        $section = VmixSection::query()->findOrFail($sectionId);
-        $section->update(['on_air' => ! $section->on_air]);
+        $section = VmixSection::query()->where('is_template', false)->findOrFail($sectionId);
+
+        if ($section->on_air) {
+            $section->update(['on_air' => false]);
+        } else {
+            $section->putOnAir();
+
+            if ($section->isInRunOfShow()) {
+                Setting::put(Setting::ShowCurrentItem, (string) $section->id);
+            }
+        }
+
+        unset($this->runOfShow, $this->standaloneSections, $this->currentItemId, $this->section);
+    }
+
+    public function showNext(): void
+    {
+        $this->step(1);
+    }
+
+    public function showPrevious(): void
+    {
+        $this->step(-1);
+    }
+
+    /**
+     * Take a standalone section out of the run of show. It stays in the sections list and keeps its on-air state.
+     */
+    public function removeFromRunOfShow(int $sectionId): void
+    {
+        VmixSection::query()->standalone()->findOrFail($sectionId)->update(['show_order' => null]);
+        unset($this->runOfShow, $this->standaloneSections);
+    }
+
+    /**
+     * Put the next (or previous) run-of-show entry on air. The current entry goes off air if it is a template item;
+     * standalone sections stay live until they are turned off.
+     */
+    protected function step(int $direction): void
+    {
+        $items = VmixSection::query()->runOfShow()->get()->values();
+        $currentIndex = $items->search(fn (VmixSection $item) => $item->id === $this->currentItemId);
+        $target = $items->get($currentIndex === false ? ($direction > 0 ? 0 : $items->count() - 1) : $currentIndex + $direction);
+
+        if (! $target) {
+            $this->dispatch('notify', message: $direction > 0 ? 'That was the last item in the run of show.' : 'Already at the first item.', type: 'error');
+
+            return;
+        }
+
+        if ($currentIndex !== false && $items->get($currentIndex)->isItem()) {
+            $items->get($currentIndex)->update(['on_air' => false]);
+        }
+
+        $target->putOnAir();
+        Setting::put(Setting::ShowCurrentItem, (string) $target->id);
+
+        $this->selectSection($target->id);
     }
 
     public function deleteSection(): void
     {
-        $this->section?->groups->flatMap->fields->each->deleteImageFiles();
-        $this->section?->delete();
-        $this->selectedSectionId = VmixSection::query()->orderBy('sort_order')->orderBy('id')->value('id');
+        $this->section?->deleteWithFiles();
+        $this->selectedSectionId = $this->firstSectionId();
         $this->loadSection();
     }
 
     public function addGroup(): void
     {
+        $this->requireOwnStructure();
         $this->newGroupName = trim($this->newGroupName);
 
         $this->validate(
@@ -191,10 +351,12 @@ new #[Title('vMix Data')] class extends Component
             ['newGroupName' => 'group name'],
         );
 
-        $this->section->groups()->create([
+        $group = $this->section->groups()->create([
             'name' => $this->newGroupName,
             'sort_order' => (int) $this->section->groups()->max('sort_order') + 1,
         ]);
+
+        $this->section->items->each(fn (VmixSection $item) => $item->mirrorGroup($group));
 
         $this->reset('newGroupName');
         $this->loadSection();
@@ -202,42 +364,67 @@ new #[Title('vMix Data')] class extends Component
 
     public function updatedGroupNames(string $name, string $groupId): void
     {
+        $this->requireOwnStructure();
         $group = $this->sectionGroup((int) $groupId);
         $name = trim($name);
 
         if (VmixGroup::query()->where('vmix_section_id', $group->vmix_section_id)->where('name', $name)->whereKeyNot($group->id)->exists()) {
-            $this->dispatch('notify', message: 'This section already has a group with that name.', type: 'error');
+            $this->dispatch('notify', message: 'This template already has a group with that name.', type: 'error');
         } elseif ($name !== '') {
             $group->update(['name' => $name]);
+            $group->copies()->update(['name' => $name]);
         }
 
         $this->loadSection();
     }
 
     /**
-     * Drag-and-drop handler: move a section to a new position. Order is also the order sections appear in the master file.
+     * Drag-and-drop handler: reorder the run of show. Next / Previous follow this order.
      */
-    public function sortSections(int|string $sectionId, int $position): void
+    /**
+     * Drag-and-drop handler for the run of show. A standalone section dragged in from the sections list is added at the drop position.
+     */
+    public function sortItems(int|string $itemId, int $position): void
     {
-        $this->moveToPosition(VmixSection::query()->orderBy('sort_order')->orderBy('id')->get(), (int) $sectionId, $position);
-        unset($this->sections);
+        $entries = VmixSection::query()->runOfShow()->get();
+
+        if (! $entries->contains('id', (int) $itemId)) {
+            $entries->push(VmixSection::query()->standalone()->findOrFail((int) $itemId));
+        }
+
+        $this->moveToPosition($entries, (int) $itemId, $position, 'show_order');
+        unset($this->standaloneSections);
+        unset($this->runOfShow);
+    }
+
+    public function sortStandalone(int|string $sectionId, int $position): void
+    {
+        $this->moveToPosition(VmixSection::query()->standalone()->get(), (int) $sectionId, $position);
+        unset($this->standaloneSections);
+    }
+
+    public function sortTemplates(int|string $templateId, int $position): void
+    {
+        $this->moveToPosition(VmixSection::query()->templates()->get(), (int) $templateId, $position);
+        unset($this->templates);
     }
 
     /**
-     * Drag-and-drop handler: move a group within the selected section.
+     * Drag-and-drop handler: move a group within the selected template. Its items follow.
      */
     public function sortGroups(int|string $groupId, int $position): void
     {
+        $this->requireOwnStructure();
         $this->sectionGroup((int) $groupId);
         $this->moveToPosition($this->section->groups()->orderBy('sort_order')->orderBy('id')->get(), (int) $groupId, $position);
+        $this->section->groups()->get()->each(fn (VmixGroup $group) => $group->copies()->update(['sort_order' => $group->sort_order]));
         $this->loadSection();
     }
 
     public function deleteGroup(int $groupId): void
     {
-        $group = $this->sectionGroup($groupId);
-        $group->fields->each->deleteImageFiles();
-        $group->delete();
+        $this->requireOwnStructure();
+        $this->sectionGroup($groupId)->deleteWithCopies();
         $this->loadSection();
     }
 
@@ -246,6 +433,7 @@ new #[Title('vMix Data')] class extends Component
      */
     public function addField(int $groupId): void
     {
+        $this->requireOwnStructure();
         $group = $this->sectionGroup($groupId);
         $input = $this->newField[$groupId] ?? [];
         $key = trim($input['key'] ?? '');
@@ -290,7 +478,7 @@ new #[Title('vMix Data')] class extends Component
         $value = $type === VmixField::TypeColor ? strtoupper($value ?? VmixField::DefaultColor) : $value;
         $needsUpdate = in_array($type, [VmixField::TypeImage, VmixField::TypeDriver], true);
 
-        $group->fields()->create([
+        $field = $group->fields()->create([
             'key' => $key,
             'type' => $type,
             'value' => $value,
@@ -300,6 +488,8 @@ new #[Title('vMix Data')] class extends Component
             'height' => $isImage ? (int) $validator->validated()['height'] : null,
             'sort_order' => (int) $group->fields()->max('sort_order') + 1,
         ]);
+
+        $group->copies->each(fn (VmixGroup $copy) => $copy->mirrorField($field));
 
         unset($this->newField[$groupId]);
         $this->resetValidation("newField.{$groupId}.key");
@@ -338,6 +528,7 @@ new #[Title('vMix Data')] class extends Component
      */
     protected function resizeImageField(int $fieldId): void
     {
+        $this->requireOwnStructure();
         $field = $this->sectionField($fieldId);
         $size = ['width' => $this->fieldWidths[$fieldId] ?? '', 'height' => $this->fieldHeights[$fieldId] ?? ''];
         $rule = ['required', 'integer', 'min:1', 'max:'.VmixField::MaxDimension];
@@ -349,6 +540,7 @@ new #[Title('vMix Data')] class extends Component
         } elseif ((int) $size['width'] !== $field->width || (int) $size['height'] !== $field->height) {
             try {
                 $field->resize((int) $size['width'], (int) $size['height']);
+                $field->copies->each->resize((int) $size['width'], (int) $size['height']);
             } catch (RuntimeException $exception) {
                 $this->dispatch('notify', message: $exception->getMessage(), type: 'error');
             }
@@ -406,8 +598,10 @@ new #[Title('vMix Data')] class extends Component
 
     public function toggleNeedsUpdate(int $fieldId): void
     {
+        $this->requireOwnStructure();
         $field = $this->sectionField($fieldId);
         $field->setNeedsUpdate(! $field->needs_update);
+        $field->copies->each->setNeedsUpdate($field->needs_update);
 
         $this->loadSection();
     }
@@ -432,6 +626,7 @@ new #[Title('vMix Data')] class extends Component
 
     public function updatedFieldKeys(string $key, string $fieldId): void
     {
+        $this->requireOwnStructure();
         $field = $this->sectionField((int) $fieldId);
         $key = trim($key);
 
@@ -446,6 +641,7 @@ new #[Title('vMix Data')] class extends Component
             $this->dispatch('notify', message: $validator->errors()->first(), type: 'error');
         } else {
             $field->update(['key' => $key]);
+            $field->copies()->update(['key' => $key]);
         }
 
         $this->loadSection();
@@ -453,9 +649,8 @@ new #[Title('vMix Data')] class extends Component
 
     public function deleteField(int $fieldId): void
     {
-        $field = $this->sectionField($fieldId);
-        $field->deleteImageFiles();
-        $field->delete();
+        $this->requireOwnStructure();
+        $this->sectionField($fieldId)->deleteWithCopies();
         $this->loadSection();
     }
 
@@ -464,7 +659,7 @@ new #[Title('vMix Data')] class extends Component
      *
      * @param  Collection<int, Model>  $records
      */
-    protected function moveToPosition(Collection $records, int $id, int $position): void
+    protected function moveToPosition(Collection $records, int $id, int $position, string $column = 'sort_order'): void
     {
         $moving = $records->firstWhere('id', $id);
 
@@ -475,7 +670,25 @@ new #[Title('vMix Data')] class extends Component
         $records = $records->reject(fn (Model $record) => $record->id === $id)->values();
         $records->splice(max(0, min($position, $records->count())), 0, [$moving]);
 
-        $records->each(fn (Model $record, int $index) => $record->sort_order === $index ? null : $record->update(['sort_order' => $index]));
+        $records->each(fn (Model $record, int $index) => $record->{$column} === $index ? null : $record->update([$column => $index]));
+    }
+
+    /**
+     * Structure (groups, fields, names, sizes, AUTO/MANUAL) is only edited on templates; items follow it.
+     */
+    /**
+     * Run-of-show items take their structure from the template, so only templates and standalone sections change it.
+     */
+    protected function requireOwnStructure(): void
+    {
+        abort_if(! $this->section || $this->section->isItem(), 403, 'Change the structure on the template.');
+    }
+
+    protected function firstSectionId(): ?int
+    {
+        return VmixSection::query()->standalone()->value('id')
+            ?? VmixSection::query()->runOfShow()->value('id')
+            ?? VmixSection::query()->templates()->value('id');
     }
 
     protected function sectionGroup(int $groupId): VmixGroup
@@ -493,48 +706,161 @@ new #[Title('vMix Data')] class extends Component
 ?>
 
 <div class="flex items-start gap-4">
-    {{-- Sections --}}
-    <aside class="w-64 shrink-0 rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
-        <div class="border-b border-slate-200 p-3">
-            <h2 class="text-sm font-bold tracking-wide text-slate-500 uppercase">Sections</h2>
+    <aside class="w-72 shrink-0 space-y-4">
+        {{-- Standalone sections --}}
+        <div class="rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
+            <div class="border-b border-slate-200 p-3">
+                <h2 class="text-sm font-bold tracking-wide text-slate-500 uppercase">Sections</h2>
+            </div>
+
+            <nav wire:sort="sortStandalone" wire:sort:config="{ group: { name: 'run-of-show', pull: 'clone', put: false } }" class="space-y-1 p-2">
+                @forelse ($this->standaloneSections as $standalone)
+                    <div
+                        wire:key="standalone-{{ $standalone->id }}"
+                        wire:sort:item="{{ $standalone->id }}"
+                        @class([
+                            'flex items-center gap-1 rounded-md pr-2',
+                            'bg-amber-400 text-slate-900' => $selectedSectionId === $standalone->id,
+                            'hover:bg-slate-100' => $selectedSectionId !== $standalone->id,
+                        ])
+                    >
+                        <span wire:sort:handle title="Drag to reorder" class="cursor-grab pl-1.5 text-sm text-slate-400 select-none hover:text-slate-700">&#10303;</span>
+                        <button type="button" wire:click="selectSection({{ $standalone->id }})" class="min-w-0 flex-1 truncate py-2 pr-2 pl-1 text-left text-sm font-bold">
+                            {{ $standalone->name }}
+                        </button>
+                        <button
+                            type="button"
+                            wire:click="toggleOnAir({{ $standalone->id }})"
+                            title="{{ $standalone->on_air ? 'Take off air' : 'Put on air' }}"
+                            @class([
+                                'shrink-0 rounded px-2 py-0.5 text-[10px] font-black tracking-wide',
+                                'bg-red-600 text-white' => $standalone->on_air,
+                                'bg-slate-200 text-slate-500 hover:bg-slate-300' => ! $standalone->on_air,
+                            ])
+                        >{{ $standalone->on_air ? 'ON AIR' : 'OFF' }}</button>
+                    </div>
+                @empty
+                    <p class="px-2 py-4 text-center text-sm text-slate-400">No standalone sections.</p>
+                @endforelse
+            </nav>
+            @if ($this->standaloneSections->isNotEmpty())
+                <p class="px-3 pb-2 text-[11px] text-slate-400">Drag a section by &#10303; into the run of show to add it there.</p>
+            @endif
+
+            <form wire:submit="addSection" class="border-t border-slate-200 p-3">
+                <input wire:model="newStandaloneName" placeholder="New section, e.g. Weather" class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
+                @error('newStandaloneName') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
+                <button type="submit" wire:loading.attr="disabled" wire:target="addSection" class="mt-2 w-full rounded-md bg-slate-900 py-1.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50">Add section</button>
+            </form>
         </div>
 
-        <nav wire:sort="sortSections" class="space-y-1 p-2">
-            @forelse ($this->sections as $section)
-                <div
-                    wire:key="section-{{ $section->id }}"
-                    wire:sort:item="{{ $section->id }}"
-                    @class([
-                        'flex items-center gap-1 rounded-md pr-2',
-                        'bg-amber-400 text-slate-900' => $selectedSectionId === $section->id,
-                        'hover:bg-slate-100' => $selectedSectionId !== $section->id,
-                    ])
-                >
-                    <span wire:sort:handle title="Drag to reorder" class="cursor-grab pl-1.5 text-sm text-slate-400 select-none hover:text-slate-700">&#10303;</span>
-                    <button type="button" wire:click="selectSection({{ $section->id }})" class="min-w-0 flex-1 truncate py-2 pr-3 pl-1 text-left text-sm font-bold">
-                        {{ $section->name }}
-                    </button>
-                    <button
-                        type="button"
-                        wire:click="toggleOnAir({{ $section->id }})"
-                        title="{{ $section->on_air ? 'Take off air' : 'Put on air' }}"
-                        @class([
-                            'shrink-0 rounded px-2 py-0.5 text-[10px] font-black tracking-wide',
-                            'bg-red-600 text-white' => $section->on_air,
-                            'bg-slate-200 text-slate-500 hover:bg-slate-300' => ! $section->on_air,
-                        ])
-                    >{{ $section->on_air ? 'ON AIR' : 'OFF' }}</button>
-                </div>
-            @empty
-                <p class="px-2 py-4 text-center text-sm text-slate-400">No sections yet.</p>
-            @endforelse
-        </nav>
+        {{-- Run of show --}}
+        <div class="rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
+            <div class="flex items-center gap-1 border-b border-slate-200 p-3">
+                <h2 class="flex-1 text-sm font-bold tracking-wide text-slate-500 uppercase">Run of show</h2>
+                <button type="button" wire:click="showPrevious" title="Take the current item off air and put the previous one on" class="rounded-md bg-slate-100 px-2 py-1 text-xs font-black hover:bg-slate-200">&#9664; Prev</button>
+                <button type="button" wire:click="showNext" title="Take the current item off air and put the next one on" class="rounded-md bg-red-600 px-2 py-1 text-xs font-black text-white hover:bg-red-500">Next &#9654;</button>
+            </div>
 
-        <form wire:submit="addSection" class="border-t border-slate-200 p-3">
-            <input wire:model="newSectionName" placeholder="New section, e.g. Track Facts" class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
-            @error('newSectionName') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
-            <button type="submit" wire:loading.attr="disabled" wire:target="addSection" class="mt-2 w-full rounded-md bg-slate-900 py-1.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50">Add section</button>
-        </form>
+            <nav wire:sort="sortItems" wire:sort:config="{ group: { name: 'run-of-show', pull: false, put: true } }" class="min-h-12 space-y-1 p-2">
+                @forelse ($this->runOfShow as $item)
+                    <div
+                        wire:key="item-{{ $item->id }}"
+                        wire:sort:item="{{ $item->id }}"
+                        @class([
+                            'flex items-center gap-1 rounded-md pr-2',
+                            'bg-amber-400 text-slate-900' => $selectedSectionId === $item->id,
+                            'hover:bg-slate-100' => $selectedSectionId !== $item->id,
+                            'ring-2 ring-red-500' => $this->currentItemId === $item->id,
+                        ])
+                    >
+                        <span wire:sort:handle title="Drag to reorder" class="cursor-grab pl-1.5 text-sm text-slate-400 select-none hover:text-slate-700">&#10303;</span>
+                        <button type="button" wire:click="selectSection({{ $item->id }})" class="min-w-0 flex-1 py-1.5 pr-2 pl-1 text-left">
+                            <span class="block truncate text-sm font-bold">{{ $item->name }}</span>
+                            <span @class(['block truncate text-[10px] font-semibold uppercase', 'text-slate-700' => $selectedSectionId === $item->id, 'text-slate-400' => $selectedSectionId !== $item->id])>{{ $item->isItem() ? $item->template->name : 'Section · stays live' }}</span>
+                        </button>
+                        @unless ($item->isItem())
+                            <button
+                                type="button"
+                                wire:click="removeFromRunOfShow({{ $item->id }})"
+                                title="Remove from the run of show (keeps the section and its on-air state)"
+                                class="shrink-0 rounded px-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                            >&times;</button>
+                        @endunless
+                        <button
+                            type="button"
+                            wire:click="toggleOnAir({{ $item->id }})"
+                            title="{{ $item->on_air ? 'Take off air' : ($item->isItem() ? 'Put on air (takes other '.$item->template->name.' items off)' : 'Put on air') }}"
+                            @class([
+                                'shrink-0 rounded px-2 py-0.5 text-[10px] font-black tracking-wide',
+                                'bg-red-600 text-white' => $item->on_air,
+                                'bg-slate-200 text-slate-500 hover:bg-slate-300' => ! $item->on_air,
+                            ])
+                        >{{ $item->on_air ? 'ON AIR' : 'OFF' }}</button>
+                    </div>
+                @empty
+                    <p class="px-2 py-4 text-center text-sm text-slate-400">Nothing in the run of show yet. Add a template item below or drag a section here.</p>
+                @endforelse
+            </nav>
+
+            <form wire:submit="addItem" class="space-y-2 border-t border-slate-200 p-3">
+                <select wire:model="newItemTemplateId" class="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
+                    <option value="">Template or section…</option>
+                    @if ($this->templates->isNotEmpty())
+                        <optgroup label="New item from template">
+                            @foreach ($this->templates as $template)
+                                <option value="{{ $template->id }}">{{ $template->name }}</option>
+                            @endforeach
+                        </optgroup>
+                    @endif
+                    @if (($sectionsOutOfShow = $this->standaloneSections->reject->isInRunOfShow())->isNotEmpty())
+                        <optgroup label="Section (stays live until turned off)">
+                            @foreach ($sectionsOutOfShow as $standalone)
+                                <option value="section:{{ $standalone->id }}">{{ $standalone->name }}</option>
+                            @endforeach
+                        </optgroup>
+                    @endif
+                </select>
+                <input wire:model="newItemName" placeholder="Item name (optional), e.g. Interview 3" class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
+                @error('newItemName') <span class="block text-xs text-red-600">{{ $message }}</span> @enderror
+                <button type="submit" wire:loading.attr="disabled" wire:target="addItem" class="w-full rounded-md bg-slate-900 py-1.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50">Add to run of show</button>
+            </form>
+        </div>
+
+        {{-- Templates --}}
+        <div class="rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
+            <div class="border-b border-slate-200 p-3">
+                <h2 class="text-sm font-bold tracking-wide text-slate-500 uppercase">Templates</h2>
+            </div>
+
+            <nav wire:sort="sortTemplates" class="space-y-1 p-2">
+                @forelse ($this->templates as $template)
+                    <div
+                        wire:key="template-{{ $template->id }}"
+                        wire:sort:item="{{ $template->id }}"
+                        @class([
+                            'flex items-center gap-1 rounded-md pr-2',
+                            'bg-amber-400 text-slate-900' => $selectedSectionId === $template->id,
+                            'hover:bg-slate-100' => $selectedSectionId !== $template->id,
+                        ])
+                    >
+                        <span wire:sort:handle title="Drag to reorder" class="cursor-grab pl-1.5 text-sm text-slate-400 select-none hover:text-slate-700">&#10303;</span>
+                        <button type="button" wire:click="selectSection({{ $template->id }})" class="min-w-0 flex-1 truncate py-2 pr-2 pl-1 text-left text-sm font-bold">
+                            {{ $template->name }}
+                        </button>
+                        <span class="shrink-0 font-mono text-[10px] text-slate-400">{{ $template->items_count }} {{ Str::plural('item', $template->items_count) }}</span>
+                    </div>
+                @empty
+                    <p class="px-2 py-4 text-center text-sm text-slate-400">No templates yet.</p>
+                @endforelse
+            </nav>
+
+            <form wire:submit="addTemplate" class="border-t border-slate-200 p-3">
+                <input wire:model="newSectionName" placeholder="New template, e.g. Interview" class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
+                @error('newSectionName') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
+                <button type="submit" wire:loading.attr="disabled" wire:target="addTemplate" class="mt-2 w-full rounded-md bg-slate-900 py-1.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50">Add template</button>
+            </form>
+        </div>
     </aside>
 
     {{-- Selected section --}}
@@ -547,94 +873,132 @@ new #[Title('vMix Data')] class extends Component
                 x-on:click="copyText(@js(route('feeds.data')), 'master file URL')"
                 class="rounded-md bg-amber-400 px-3 py-1.5 text-xs font-bold text-slate-900"
             >Copy URL</button>
-            <p class="w-full text-xs text-slate-400">Only sections that are <span class="font-bold text-red-400">ON AIR</span> are in the file. Edits go out as soon as they save.</p>
+            <p class="w-full text-xs text-slate-400">Every standalone section that is <span class="font-bold text-red-400">ON AIR</span> goes out under its own key. Each template's key holds whichever of its items is on air.</p>
         </div>
 
         @if ($section = $this->section)
+            @php($isTemplate = $section->isTemplate())
+            @php($ownsStructure = ! $section->isItem())
             <div class="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
                 <div class="flex flex-wrap items-end gap-3">
                     <label class="block">
-                        <span class="text-xs font-semibold text-slate-500">Section name</span>
+                        <span class="text-xs font-semibold text-slate-500">{{ $isTemplate ? 'Template name' : ($ownsStructure ? 'Section name' : 'Item name') }}</span>
                         <input
                             wire:model.blur="sectionName"
                             x-on:keydown.enter.prevent="$el.blur()"
                             class="mt-0.5 block w-56 rounded-md border border-slate-300 px-2 py-1.5 text-lg font-black focus:border-amber-500 focus:outline-none"
                         >
                     </label>
-                    <label class="block">
-                        <span class="text-xs font-semibold text-slate-500">JSON key</span>
-                        <input
-                            wire:model.blur="sectionKey"
-                            x-on:keydown.enter.prevent="$el.blur()"
-                            class="mt-0.5 block w-48 rounded-md border border-slate-300 px-2 py-2 font-mono text-sm focus:border-amber-500 focus:outline-none"
-                        >
-                    </label>
+                    @if ($ownsStructure)
+                        <label class="block">
+                            <span class="text-xs font-semibold text-slate-500">JSON key</span>
+                            <input
+                                wire:model.blur="sectionKey"
+                                x-on:keydown.enter.prevent="$el.blur()"
+                                class="mt-0.5 block w-48 rounded-md border border-slate-300 px-2 py-2 font-mono text-sm focus:border-amber-500 focus:outline-none"
+                            >
+                        </label>
+                    @else
+                        <div class="pb-1 text-sm text-slate-500">
+                            From template
+                            <button type="button" wire:click="selectSection({{ $section->template_id }})" class="font-bold text-slate-900 underline decoration-amber-400 decoration-2">{{ $section->template->name }}</button>
+                            &middot; feeds <code class="rounded bg-slate-100 px-1 font-mono text-xs">{{ $section->template->key }}</code>
+                        </div>
+                    @endif
 
                     <div class="flex-1"></div>
 
-                    <button
-                        type="button"
-                        wire:click="toggleOnAir({{ $section->id }})"
-                        @class([
-                            'rounded-md px-4 py-2 text-sm font-black',
-                            'bg-red-600 text-white hover:bg-red-500' => $section->on_air,
-                            'bg-slate-200 text-slate-600 hover:bg-slate-300' => ! $section->on_air,
-                        ])
-                    >{{ $section->on_air ? 'ON AIR — take off' : 'OFF AIR — put on air' }}</button>
-                    @if ($pendingInSection = $section->groups->flatMap->fields->filter->isPending()->count())
-                        <button type="button" wire:click="pushSection" class="rounded-md bg-red-600 px-4 py-2 text-sm font-black text-white hover:bg-red-500">Update all pending ({{ $pendingInSection }})</button>
+                    @if ($isTemplate)
+                        <span class="rounded-md bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600">TEMPLATE &middot; {{ $section->items_count }} {{ Str::plural('item', $section->items_count) }}</span>
+                    @else
+                        <button
+                            type="button"
+                            wire:click="toggleOnAir({{ $section->id }})"
+                            @class([
+                                'rounded-md px-4 py-2 text-sm font-black',
+                                'bg-red-600 text-white hover:bg-red-500' => $section->on_air,
+                                'bg-slate-200 text-slate-600 hover:bg-slate-300' => ! $section->on_air,
+                            ])
+                        >{{ $section->on_air ? 'ON AIR — take off' : 'OFF AIR — put on air' }}</button>
+                        @if ($pendingInSection = $section->groups->flatMap->fields->filter->isPending()->count())
+                            <button type="button" wire:click="pushSection" class="rounded-md bg-red-600 px-4 py-2 text-sm font-black text-white hover:bg-red-500">Update all pending ({{ $pendingInSection }})</button>
+                        @endif
                     @endif
                     <button
                         type="button"
                         wire:click="deleteSection"
-                        wire:confirm="Delete {{ $section->name }} with all its groups and fields?"
+                        wire:confirm="{{ match (true) {
+                            $isTemplate => 'Delete the '.$section->name.' template and all '.$section->items_count.' of its run-of-show items?',
+                            $ownsStructure => 'Delete '.$section->name.' with all its groups and fields?',
+                            default => 'Delete '.$section->name.' from the run of show?',
+                        } }}"
                         class="rounded-md px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50"
-                    >Delete section</button>
+                    >{{ $isTemplate ? 'Delete template' : ($ownsStructure ? 'Delete section' : 'Delete item') }}</button>
                 </div>
 
-                <form wire:submit="addGroup" class="mt-4 flex items-start gap-2 border-t border-slate-100 pt-4">
-                    <div>
-                        <input wire:model="newGroupName" placeholder="New group, e.g. Heading" class="w-56 rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
-                        @error('newGroupName') <span class="block text-xs text-red-600">{{ $message }}</span> @enderror
-                    </div>
-                    <button type="submit" wire:loading.attr="disabled" wire:target="addGroup" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50">Add group</button>
-                    <p class="self-center text-xs text-slate-400">Groups organize fields on this screen. All fields in the section go out together, so each field name is used once per section.</p>
-                </form>
+                @if ($ownsStructure)
+                    <form wire:submit="addGroup" class="mt-4 flex items-start gap-2 border-t border-slate-100 pt-4">
+                        <div>
+                            <input wire:model="newGroupName" placeholder="New group, e.g. Heading" class="w-56 rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
+                            @error('newGroupName') <span class="block text-xs text-red-600">{{ $message }}</span> @enderror
+                        </div>
+                        <button type="submit" wire:loading.attr="disabled" wire:target="addGroup" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50">Add group</button>
+                        <p class="self-center text-xs text-slate-400">
+                            @if ($isTemplate)
+                                Groups, fields, sizes and AUTO/MANUAL set here apply to every item made from this template. Values here are the defaults for new items.
+                            @else
+                                Groups organize fields on this screen. All fields in the section go out together, so each field name is used once per section.
+                            @endif
+                        </p>
+                    </form>
+                @else
+                    <p class="mt-3 border-t border-slate-100 pt-3 text-xs text-slate-400">Fill in this item's values. To add or change fields, edit the <span class="font-semibold">{{ $section->template->name }}</span> template.</p>
+                @endif
             </div>
 
-            <div wire:sort="sortGroups" class="grid grid-cols-1 gap-3 xl:grid-cols-2">
+            <div @if ($ownsStructure) wire:sort="sortGroups" @endif class="grid grid-cols-1 gap-3 xl:grid-cols-2">
                 @forelse ($section->groups as $group)
                     <div wire:key="group-{{ $group->id }}" wire:sort:item="{{ $group->id }}" class="rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
                         <div class="flex items-center gap-2 border-b border-slate-100 p-2">
-                            <span wire:sort:handle title="Drag to reorder" class="cursor-grab px-1 text-base text-slate-400 select-none hover:text-slate-700">&#10303;</span>
-                            <input
-                                wire:model.blur="groupNames.{{ $group->id }}"
-                                x-on:keydown.enter.prevent="$el.blur()"
-                                class="min-w-0 flex-1 rounded border border-transparent px-1 py-0.5 font-bold hover:border-slate-200 focus:border-amber-500 focus:outline-none"
-                            >
-                            @if ($pendingInGroup = $group->fields->filter->isPending()->count())
+                            @if ($ownsStructure)
+                                <span wire:sort:handle title="Drag to reorder" class="cursor-grab px-1 text-base text-slate-400 select-none hover:text-slate-700">&#10303;</span>
+                                <input
+                                    wire:model.blur="groupNames.{{ $group->id }}"
+                                    x-on:keydown.enter.prevent="$el.blur()"
+                                    class="min-w-0 flex-1 rounded border border-transparent px-1 py-0.5 font-bold hover:border-slate-200 focus:border-amber-500 focus:outline-none"
+                                >
+                            @else
+                                <span class="min-w-0 flex-1 px-1 py-0.5 font-bold">{{ $group->name }}</span>
+                            @endif
+                            @if (! $isTemplate && ($pendingInGroup = $group->fields->filter->isPending()->count()))
                                 <button type="button" wire:click="pushGroup({{ $group->id }})" class="rounded bg-red-600 px-2 py-0.5 text-xs font-black text-white hover:bg-red-500">Update all ({{ $pendingInGroup }})</button>
                             @endif
-                            <button
-                                type="button"
-                                wire:click="deleteGroup({{ $group->id }})"
-                                wire:confirm="Delete group {{ $group->name }}?"
-                                class="rounded px-2 py-0.5 text-xs font-bold text-red-600 hover:bg-red-50"
-                            >Delete</button>
+                            @if ($ownsStructure)
+                                <button
+                                    type="button"
+                                    wire:click="deleteGroup({{ $group->id }})"
+                                    wire:confirm="{{ $isTemplate ? 'Delete group '.$group->name.' from the template and every item?' : 'Delete group '.$group->name.'?' }}"
+                                    class="rounded px-2 py-0.5 text-xs font-bold text-red-600 hover:bg-red-50"
+                                >Delete</button>
+                            @endif
                         </div>
 
                         <div class="space-y-1 p-2">
                             @foreach ($group->fields as $field)
                                 <div
                                     wire:key="field-{{ $field->id }}"
-                                    @class(['rounded', 'bg-amber-50 p-1 ring-1 ring-amber-300' => $field->isPending()])
+                                    @class(['rounded', 'bg-amber-50 p-1 ring-1 ring-amber-300' => ! $isTemplate && $field->isPending()])
                                 >
                                 <div class="flex items-center gap-1">
-                                    <input
-                                        wire:model.blur="fieldKeys.{{ $field->id }}"
-                                        x-on:keydown.enter.prevent="$el.blur()"
-                                        class="w-36 shrink-0 rounded border border-slate-200 bg-slate-50 px-1.5 py-1 font-mono text-xs focus:border-amber-500 focus:outline-none"
-                                    >
+                                    @if ($ownsStructure)
+                                        <input
+                                            wire:model.blur="fieldKeys.{{ $field->id }}"
+                                            x-on:keydown.enter.prevent="$el.blur()"
+                                            class="w-36 shrink-0 rounded border border-slate-200 bg-slate-50 px-1.5 py-1 font-mono text-xs focus:border-amber-500 focus:outline-none"
+                                        >
+                                    @else
+                                        <span class="w-36 shrink-0 truncate px-1.5 py-1 font-mono text-xs text-slate-500" title="{{ $field->key }}">{{ $field->key }}</span>
+                                    @endif
                                     @if ($field->isImage())
                                         <div class="flex min-w-0 flex-1 items-center gap-2 rounded border border-slate-200 px-1.5 py-1">
                                             @if ($url = $field->imageUrl())
@@ -645,11 +1009,15 @@ new #[Title('vMix Data')] class extends Component
                                             @else
                                                 <span class="min-w-0 flex-1 text-xs text-slate-400">No image</span>
                                             @endif
-                                            <div class="flex shrink-0 items-center gap-0.5 text-xs text-slate-400" title="Images are resized and cropped from the center to this size. Changing it re-crops the uploaded image.">
-                                                <input type="number" min="1" max="{{ VmixField::MaxDimension }}" wire:model.blur="fieldWidths.{{ $field->id }}" x-on:keydown.enter.prevent="$el.blur()" aria-label="Width" class="w-14 rounded border border-slate-200 px-1 py-0.5 text-right text-xs text-slate-700 focus:border-amber-500 focus:outline-none">
-                                                &times;
-                                                <input type="number" min="1" max="{{ VmixField::MaxDimension }}" wire:model.blur="fieldHeights.{{ $field->id }}" x-on:keydown.enter.prevent="$el.blur()" aria-label="Height" class="w-14 rounded border border-slate-200 px-1 py-0.5 text-right text-xs text-slate-700 focus:border-amber-500 focus:outline-none">
-                                            </div>
+                                            @if ($ownsStructure)
+                                                <div class="flex shrink-0 items-center gap-0.5 text-xs text-slate-400" title="Images are resized and cropped from the center to this size. Changing it re-crops the uploaded image{{ $isTemplate ? ' here and in every item' : '' }}.">
+                                                    <input type="number" min="1" max="{{ VmixField::MaxDimension }}" wire:model.blur="fieldWidths.{{ $field->id }}" x-on:keydown.enter.prevent="$el.blur()" aria-label="Width" class="w-14 rounded border border-slate-200 px-1 py-0.5 text-right text-xs text-slate-700 focus:border-amber-500 focus:outline-none">
+                                                    &times;
+                                                    <input type="number" min="1" max="{{ VmixField::MaxDimension }}" wire:model.blur="fieldHeights.{{ $field->id }}" x-on:keydown.enter.prevent="$el.blur()" aria-label="Height" class="w-14 rounded border border-slate-200 px-1 py-0.5 text-right text-xs text-slate-700 focus:border-amber-500 focus:outline-none">
+                                                </div>
+                                            @else
+                                                <span class="shrink-0 font-mono text-xs text-slate-400" title="Size is set on the template">{{ $field->width }}&times;{{ $field->height }}</span>
+                                            @endif
                                             <span wire:loading wire:target="uploads.{{ $field->id }}, fieldWidths.{{ $field->id }}, fieldHeights.{{ $field->id }}" class="text-xs font-semibold text-amber-600">Working…</span>
                                             <label class="shrink-0 cursor-pointer rounded bg-slate-900 px-2 py-0.5 text-xs font-bold text-white hover:bg-slate-700">
                                                 {{ $field->imageUrl() ? 'Replace' : 'Upload' }}
@@ -714,28 +1082,42 @@ new #[Title('vMix Data')] class extends Component
                                             class="min-w-0 flex-1 rounded border border-slate-200 px-1.5 py-1 text-sm focus:border-amber-500 focus:outline-none"
                                         >
                                     @endif
-                                    <button
-                                        type="button"
-                                        wire:click="toggleNeedsUpdate({{ $field->id }})"
-                                        title="{{ $field->needs_update ? 'Changes wait for Update. Click to go live as you type.' : 'Changes go live as you type. Click to make changes wait for Update.' }}"
-                                        @class([
-                                            'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-black tracking-wide',
-                                            'bg-slate-800 text-white' => $field->needs_update,
-                                            'bg-emerald-100 text-emerald-800' => ! $field->needs_update,
-                                        ])
-                                    >{{ $field->needs_update ? 'MANUAL' : 'AUTO' }}</button>
-                                    @if ($field->isPending())
-                                        <button type="button" wire:click="pushField({{ $field->id }})" class="shrink-0 rounded bg-red-600 px-2 py-0.5 text-xs font-black text-white hover:bg-red-500">Update</button>
+                                    @if ($ownsStructure)
+                                        <button
+                                            type="button"
+                                            wire:click="toggleNeedsUpdate({{ $field->id }})"
+                                            title="{{ $field->needs_update ? 'Changes wait for Update. Click to go live as you type.' : 'Changes go live as you type. Click to make them wait for Update.' }}"
+                                            @class([
+                                                'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-black tracking-wide',
+                                                'bg-slate-800 text-white' => $field->needs_update,
+                                                'bg-emerald-100 text-emerald-800' => ! $field->needs_update,
+                                            ])
+                                        >{{ $field->needs_update ? 'MANUAL' : 'AUTO' }}</button>
+                                        @if (! $isTemplate && $field->isPending())
+                                            <button type="button" wire:click="pushField({{ $field->id }})" class="shrink-0 rounded bg-red-600 px-2 py-0.5 text-xs font-black text-white hover:bg-red-500">Update</button>
+                                        @endif
+                                        <button
+                                            type="button"
+                                            wire:click="deleteField({{ $field->id }})"
+                                            wire:confirm="{{ $isTemplate ? 'Delete field '.$field->key.' from the template and every item?' : 'Delete field '.$field->key.'?' }}"
+                                            title="Remove {{ $field->key }} from this group"
+                                            class="rounded px-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                                        >&times;</button>
+                                    @else
+                                        <span
+                                            title="{{ $field->needs_update ? 'Changes wait for Update (set on the template)' : 'Changes go live as you type (set on the template)' }}"
+                                            @class([
+                                                'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-black tracking-wide',
+                                                'bg-slate-800 text-white' => $field->needs_update,
+                                                'bg-emerald-100 text-emerald-800' => ! $field->needs_update,
+                                            ])
+                                        >{{ $field->needs_update ? 'MANUAL' : 'AUTO' }}</span>
+                                        @if ($field->isPending())
+                                            <button type="button" wire:click="pushField({{ $field->id }})" class="shrink-0 rounded bg-red-600 px-2 py-0.5 text-xs font-black text-white hover:bg-red-500">Update</button>
+                                        @endif
                                     @endif
-                                    <button
-                                        type="button"
-                                        wire:click="deleteField({{ $field->id }})"
-                                        wire:confirm="Delete field {{ $field->key }}?"
-                                        title="Remove {{ $field->key }} from this group"
-                                        class="rounded px-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                                    >&times;</button>
                                 </div>
-                                @if ($field->isPending())
+                                @if (! $isTemplate && $field->isPending())
                                     <div class="mt-1 flex items-center gap-2 pl-1 text-xs text-slate-500">
                                         <span class="rounded bg-red-600 px-1 text-[10px] font-black text-white">ON AIR</span>
                                         @if ($field->isImage())
@@ -759,6 +1141,7 @@ new #[Title('vMix Data')] class extends Component
                                 </div>
                             @endforeach
 
+                            @if ($ownsStructure)
                             <form wire:submit="addField({{ $group->id }})" class="flex items-start gap-1 pt-1">
                                 <div class="w-36 shrink-0">
                                     <input wire:model="newField.{{ $group->id }}.key" placeholder="field_name" class="w-full rounded border border-dashed border-slate-300 px-1.5 py-1 font-mono text-xs focus:border-amber-500 focus:outline-none">
@@ -793,11 +1176,16 @@ new #[Title('vMix Data')] class extends Component
                                 <button type="submit" wire:loading.attr="disabled" wire:target="addField" class="rounded bg-slate-100 px-2 py-1 text-xs font-bold hover:bg-slate-200 disabled:opacity-50">Add field</button>
                             </form>
                             @error("newField.{$group->id}.key") <span class="text-xs text-red-600">{{ $message }}</span> @enderror
+                            @endif
                         </div>
                     </div>
                 @empty
                     <div class="rounded-xl border-2 border-dashed border-slate-300 p-8 text-center text-slate-400 xl:col-span-2">
-                        Add a group above, e.g. “Heading”, then give it fields like <code>track_name</code>.
+                        @if ($ownsStructure)
+                            Add a group above, e.g. “Heading”, then give it fields like <code>driver</code> or <code>topic</code>.
+                        @else
+                            The {{ $section->template->name }} template has no groups yet.
+                        @endif
                     </div>
                 @endforelse
             </div>
@@ -811,7 +1199,7 @@ new #[Title('vMix Data')] class extends Component
             </div>
         @else
             <div class="rounded-xl border-2 border-dashed border-slate-300 p-10 text-center text-slate-400">
-                Add a section on the left, e.g. “Track Facts”.
+                Add a standalone section on the left, e.g. “Weather”, or a template like “Interview” with items such as “Interview 1” in the run of show.
             </div>
         @endif
     </section>

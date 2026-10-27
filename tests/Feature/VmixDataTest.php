@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Competitor;
+use App\Models\Setting;
 use App\Models\User;
 use App\Models\VmixField;
 use App\Models\VmixGroup;
@@ -31,20 +32,20 @@ class VmixDataTest extends TestCase
             ->assertSee(route('feeds.data'));
     }
 
-    public function test_building_a_section_with_groups_and_fields(): void
+    public function test_building_a_template_with_groups_and_fields(): void
     {
         $this->actingAs(User::factory()->create());
 
         $component = Livewire::test('pages::vmix-data')
             ->set('newSectionName', 'Track Facts')
-            ->call('addSection')
+            ->call('addTemplate')
             ->set('newGroupName', 'Heading')
             ->call('addGroup');
 
         $section = VmixSection::query()->sole();
         $heading = $section->groups()->sole();
         $this->assertSame('track_facts', $section->key);
-        $this->assertFalse($section->on_air);
+        $this->assertTrue($section->isTemplate());
         $component->assertSet('selectedSectionId', $section->id);
 
         $component
@@ -83,25 +84,31 @@ class VmixDataTest extends TestCase
         $this->assertSame(['track_length'], $data->fields()->pluck('key')->all());
     }
 
-    public function test_toggling_a_section_on_and_off_air(): void
+    public function test_toggling_an_item_on_and_off_air(): void
     {
         $this->actingAs(User::factory()->create());
-        $section = VmixSection::factory()->create();
+        $template = VmixSection::factory()->template()->create();
+        $item = VmixSection::factory()->itemOf($template)->create();
 
-        $component = Livewire::test('pages::vmix-data')->call('toggleOnAir', $section->id);
-        $this->assertTrue($section->refresh()->on_air);
+        $component = Livewire::test('pages::vmix-data')->call('toggleOnAir', $item->id);
+        $this->assertTrue($item->refresh()->on_air);
+        $this->assertSame((string) $item->id, Setting::get(Setting::ShowCurrentItem));
 
-        $component->call('toggleOnAir', $section->id);
-        $this->assertFalse($section->refresh()->on_air);
+        $component->call('toggleOnAir', $item->id);
+        $this->assertFalse($item->refresh()->on_air);
+
+        $component->call('toggleOnAir', $template->id)->assertNotFound();
     }
 
     public function test_editing_a_value_updates_the_master_file_immediately(): void
     {
         $this->actingAs(User::factory()->create());
-        $section = VmixSection::factory()->onAir()->create(['key' => 'track_facts']);
-        $field = VmixField::factory()
-            ->for(VmixGroup::factory()->for($section, 'section'), 'group')
+        $template = VmixSection::factory()->template()->create(['key' => 'track_facts']);
+        VmixField::factory()
+            ->for(VmixGroup::factory()->for($template, 'section'), 'group')
             ->create(['key' => 'track_name', 'value' => 'Old']);
+        $section = $this->onAirItemOf($template);
+        $field = $this->itemField($section, 'track_name');
 
         Livewire::test('pages::vmix-data', ['selectedSectionId' => $section->id])
             ->assertSet("fieldValues.{$field->id}", 'Old')
@@ -141,7 +148,7 @@ class VmixDataTest extends TestCase
         $this->assertSame('track_record', $record->refresh()->key);
     }
 
-    public function test_adding_a_section_or_group_with_an_existing_name_is_rejected(): void
+    public function test_adding_a_template_or_group_with_an_existing_name_is_rejected(): void
     {
         $this->actingAs(User::factory()->create());
         $section = VmixSection::factory()->create(['name' => 'Track Facts']);
@@ -149,7 +156,7 @@ class VmixDataTest extends TestCase
 
         Livewire::test('pages::vmix-data', ['selectedSectionId' => $section->id])
             ->set('newSectionName', 'Track Facts ')
-            ->call('addSection')
+            ->call('addTemplate')
             ->assertHasErrors('newSectionName')
             ->set('newGroupName', 'Heading')
             ->call('addGroup')
@@ -163,21 +170,25 @@ class VmixDataTest extends TestCase
     {
         Storage::fake('public');
         $this->actingAs(User::factory()->create());
-        $section = VmixSection::factory()->onAir()->create(['key' => 'ringers']);
-        $group = VmixGroup::factory()->for($section, 'section')->create();
+        $template = VmixSection::factory()->template()->create(['key' => 'ringers']);
+        $group = VmixGroup::factory()->for($template, 'section')->create();
 
-        $component = Livewire::test('pages::vmix-data', ['selectedSectionId' => $section->id])
+        $templateField = Livewire::test('pages::vmix-data', ['selectedSectionId' => $template->id])
             ->set("newField.{$group->id}.key", 'logo')
             ->set("newField.{$group->id}.type", 'image')
             ->set("newField.{$group->id}.width", '400')
             ->set("newField.{$group->id}.height", '200')
             ->call('addField', $group->id)
-            ->assertHasNoErrors();
+            ->assertHasNoErrors()
+            ->call('toggleNeedsUpdate', $group->fields()->sole()->id)
+            ->instance()->section->groups->sole()->fields->sole();
 
-        $field = VmixField::query()->sole();
-        $this->assertTrue($field->isImage());
-        $this->assertSame([400, 200], [$field->width, $field->height]);
-        $component->call('toggleNeedsUpdate', $field->id);
+        $this->assertTrue($templateField->isImage());
+        $this->assertSame([400, 200], [$templateField->width, $templateField->height]);
+
+        $section = $this->onAirItemOf($template);
+        $field = $this->itemField($section, 'logo');
+        $component = Livewire::test('pages::vmix-data', ['selectedSectionId' => $section->id]);
 
         $component->set("uploads.{$field->id}", UploadedFile::fake()->image('logo.png', 1000, 1000));
 
@@ -260,26 +271,31 @@ class VmixDataTest extends TestCase
     public function test_driver_fields_expand_to_the_drivers_details(): void
     {
         $this->actingAs(User::factory()->create());
-        $section = VmixSection::factory()->onAir()->create(['key' => 'ringers']);
-        $group = VmixGroup::factory()->for($section, 'section')->create();
+        $template = VmixSection::factory()->template()->create(['key' => 'ringers']);
+        $group = VmixGroup::factory()->for($template, 'section')->create();
         $driver = Competitor::factory()->create([
             'car_number' => '71H', 'first_name' => 'Max', 'last_name' => 'Stambaugh', 'hometown' => 'Elida, OH', 'accolades' => 'Champ',
         ]);
         $other = Competitor::factory()->create(['first_name' => 'Tim', 'last_name' => 'Ward']);
 
-        $component = Livewire::test('pages::vmix-data', ['selectedSectionId' => $section->id])
+        Livewire::test('pages::vmix-data', ['selectedSectionId' => $template->id])
             ->set("newField.{$group->id}.key", 'ringer_1')
             ->set("newField.{$group->id}.type", 'driver')
             ->set("newField.{$group->id}.value", (string) $driver->id)
             ->call('addField', $group->id)
             ->assertHasNoErrors();
 
-        $field = VmixField::query()->sole();
-        $this->assertTrue($field->isDriver());
-        $this->assertTrue($field->needs_update);
+        $templateField = $group->fields()->sole();
+        $this->assertTrue($templateField->isDriver());
+        $this->assertTrue($templateField->needs_update);
+
+        $section = $this->onAirItemOf($template);
+        $field = $this->itemField($section, 'ringer_1');
+        $field->update(['live_value' => null]);
         $this->assertSame('', $this->getJson(route('feeds.data'))->json('ringers.0')['ringer_1_name']);
 
-        $component->call('pushField', $field->id)->call('toggleNeedsUpdate', $field->id);
+        $component = Livewire::test('pages::vmix-data', ['selectedSectionId' => $section->id])->call('pushField', $field->id);
+        $field->update(['needs_update' => false]);
 
         $row = $this->getJson(route('feeds.data'))->json('ringers.0');
         $this->assertSame([
@@ -306,14 +322,18 @@ class VmixDataTest extends TestCase
     public function test_manual_fields_wait_for_update_and_show_what_is_on_air(): void
     {
         $this->actingAs(User::factory()->create());
-        $section = VmixSection::factory()->onAir()->create(['key' => 'ringers']);
-        [$first, $second] = VmixGroup::factory()->count(2)->for($section, 'section')->create();
+        $template = VmixSection::factory()->template()->create(['key' => 'ringers']);
+        $first = VmixGroup::factory()->for($template, 'section')->create(['sort_order' => 1]);
+        $second = VmixGroup::factory()->for($template, 'section')->create(['sort_order' => 2]);
         $driver = Competitor::factory()->create(['first_name' => 'Max', 'last_name' => 'Stambaugh']);
         $replacement = Competitor::factory()->create(['first_name' => 'Tim', 'last_name' => 'Ward']);
-        $ringer = VmixField::factory()->for($first, 'group')->needsUpdate()->create(['key' => 'ringer', 'type' => 'driver', 'value' => (string) $driver->id]);
-        $title = VmixField::factory()->for($first, 'group')->needsUpdate()->create(['key' => 'title', 'value' => 'Ringers']);
-        $note = VmixField::factory()->for($second, 'group')->needsUpdate()->create(['key' => 'note', 'value' => 'Old']);
-        $auto = VmixField::factory()->for($second, 'group')->create(['key' => 'auto', 'value' => 'A']);
+        VmixField::factory()->for($first, 'group')->needsUpdate()->create(['key' => 'ringer', 'type' => 'driver', 'value' => (string) $driver->id]);
+        VmixField::factory()->for($first, 'group')->needsUpdate()->create(['key' => 'title', 'value' => 'Ringers']);
+        VmixField::factory()->for($second, 'group')->needsUpdate()->create(['key' => 'note', 'value' => 'Old']);
+        VmixField::factory()->for($second, 'group')->create(['key' => 'auto', 'value' => 'A']);
+
+        $section = $this->onAirItemOf($template);
+        [$ringer, $title, $note, $auto] = array_map(fn (string $key) => $this->itemField($section, $key), ['ringer', 'title', 'note', 'auto']);
 
         $component = Livewire::test('pages::vmix-data', ['selectedSectionId' => $section->id])
             ->set("fieldValues.{$ringer->id}", (string) $replacement->id)
@@ -330,7 +350,7 @@ class VmixDataTest extends TestCase
         $component->call('pushField', $title->id);
         $this->assertSame('Ringer Lineup', $this->getJson(route('feeds.data'))->json('ringers.0')['title']);
 
-        $component->call('pushGroup', $first->id);
+        $component->call('pushGroup', $ringer->vmix_group_id);
         $row = $this->getJson(route('feeds.data'))->json('ringers.0');
         $this->assertSame(['Tim Ward', 'Old'], [$row['ringer_name'], $row['note']]);
 
@@ -420,24 +440,29 @@ class VmixDataTest extends TestCase
         $this->assertModelExists($otherGroup);
     }
 
-    public function test_master_file_has_every_field_of_each_on_air_section(): void
+    public function test_master_file_has_the_on_air_item_of_each_template_under_the_template_key(): void
     {
-        $facts = VmixSection::factory()->onAir()->create(['key' => 'track_facts', 'sort_order' => 1]);
+        $facts = VmixSection::factory()->template()->create(['key' => 'track_facts', 'sort_order' => 1]);
         $heading = VmixGroup::factory()->for($facts, 'section')->create(['sort_order' => 1]);
         $data = VmixGroup::factory()->for($facts, 'section')->create(['sort_order' => 2]);
         VmixField::factory()->for($heading, 'group')->create(['key' => 'track_name', 'value' => 'Knoxville Raceway']);
         VmixField::factory()->for($data, 'group')->create(['key' => 'track_record', 'value' => '14.592']);
         VmixField::factory()->for($data, 'group')->create(['key' => 'notes', 'value' => null]);
 
-        $sponsors = VmixSection::factory()->onAir()->create(['key' => 'sponsors', 'sort_order' => 2]);
+        $sponsors = VmixSection::factory()->template()->create(['key' => 'sponsors', 'sort_order' => 2]);
         VmixField::factory()
             ->for(VmixGroup::factory()->for($sponsors, 'section'), 'group')
             ->create(['key' => 'sponsor_name', 'value' => 'Casey’s']);
 
-        $offAir = VmixSection::factory()->create(['key' => 'weather']);
+        $offAir = VmixSection::factory()->template()->create(['key' => 'weather']);
         VmixField::factory()
             ->for(VmixGroup::factory()->for($offAir, 'section'), 'group')
             ->create(['key' => 'temp', 'value' => '72']);
+
+        $this->onAirItemOf($facts);
+        $this->itemField($this->onAirItemOf($sponsors, 'Sponsors 1'), 'sponsor_name')->update(['value' => 'Old', 'live_value' => 'Old']);
+        $this->itemField($this->onAirItemOf($sponsors, 'Sponsors 2'), 'sponsor_name');
+        $offAir->createItem('Weather 1');
 
         $this->get(route('feeds.data'))
             ->assertOk()
@@ -455,19 +480,20 @@ class VmixDataTest extends TestCase
         $this->assertSame('{}', $this->get(route('feeds.data'))->assertOk()->getContent());
     }
 
-    public function test_sections_can_be_dragged_into_a_new_order(): void
+    public function test_run_of_show_items_and_templates_can_be_dragged_into_a_new_order(): void
     {
         $this->actingAs(User::factory()->create());
         [$first, $second, $third] = collect(['first', 'second', 'third'])
-            ->map(fn (string $key, int $index) => VmixSection::factory()->onAir()->create(['key' => $key, 'sort_order' => $index]));
-        foreach ([$first, $second, $third] as $section) {
-            VmixField::factory()->for(VmixGroup::factory()->for($section, 'section'), 'group')->create(['key' => 'title']);
-        }
+            ->map(fn (string $key, int $index) => VmixSection::factory()->template()->create(['key' => $key, 'sort_order' => $index]));
+        $items = collect([$first, $second, $third])->map(fn (VmixSection $template) => $this->onAirItemOf($template));
 
-        Livewire::test('pages::vmix-data')->call('sortSections', $third->id, 0);
+        $component = Livewire::test('pages::vmix-data')->call('sortItems', $items[2]->id, 0);
 
-        $this->assertSame([$third->id, $first->id, $second->id], VmixSection::query()->orderBy('sort_order')->pluck('id')->all());
+        $this->assertSame([$items[2]->id, $items[0]->id, $items[1]->id], VmixSection::query()->runOfShow()->pluck('id')->all());
         $this->assertSame(['third', 'first', 'second'], array_keys($this->getJson(route('feeds.data'))->json()));
+
+        $component->call('sortTemplates', $first->id, 2);
+        $this->assertSame([$second->id, $third->id, $first->id], VmixSection::query()->templates()->pluck('id')->all());
     }
 
     public function test_groups_can_be_dragged_into_a_new_order_within_their_section(): void
@@ -489,10 +515,10 @@ class VmixDataTest extends TestCase
     public function test_color_fields_save_hex_values_live(): void
     {
         $this->actingAs(User::factory()->create());
-        $section = VmixSection::factory()->onAir()->create(['key' => 'theme']);
-        $group = VmixGroup::factory()->for($section, 'section')->create();
+        $template = VmixSection::factory()->template()->create(['key' => 'theme']);
+        $group = VmixGroup::factory()->for($template, 'section')->create();
 
-        $component = Livewire::test('pages::vmix-data', ['selectedSectionId' => $section->id])
+        Livewire::test('pages::vmix-data', ['selectedSectionId' => $template->id])
             ->set("newField.{$group->id}.key", 'accent')
             ->set("newField.{$group->id}.type", 'color')
             ->set("newField.{$group->id}.value", 'not-a-color')
@@ -505,7 +531,10 @@ class VmixDataTest extends TestCase
         $field = $group->fields()->sole();
         $this->assertSame([VmixField::TypeColor, '#FF6600', '#FF6600', false], [$field->type, $field->value, $field->live_value, $field->needs_update]);
 
-        $component
+        $item = $this->onAirItemOf($template);
+        $field = $this->itemField($item, 'accent');
+
+        Livewire::test('pages::vmix-data', ['selectedSectionId' => $item->id])
             ->set("fieldValues.{$field->id}", '#00aa33')
             ->assertSet("fieldValues.{$field->id}", '#00AA33')
             ->set("fieldValues.{$field->id}", 'red')
@@ -527,5 +556,287 @@ class VmixDataTest extends TestCase
             ->assertHasNoErrors();
 
         $this->assertSame(VmixField::DefaultColor, $group->fields()->sole()->value);
+    }
+
+    public function test_adding_an_item_copies_the_template_structure_and_default_values(): void
+    {
+        Storage::fake('public');
+        $this->actingAs(User::factory()->create());
+        $template = VmixSection::factory()->template()->create(['name' => 'Interview', 'key' => 'interview']);
+        $group = VmixGroup::factory()->for($template, 'section')->create(['name' => 'Guest']);
+        $driver = VmixField::factory()->for($group, 'group')->needsUpdate()->create(['key' => 'guest', 'type' => 'driver', 'value' => null]);
+        VmixField::factory()->for($group, 'group')->create(['key' => 'topic', 'value' => 'Heat 1 recap']);
+        $logoPath = UploadedFile::fake()->image('logo.png')->store('vmix', 'public');
+        VmixField::factory()->for($group, 'group')->image($logoPath)->create(['key' => 'logo']);
+
+        Livewire::test('pages::vmix-data')
+            ->set('newItemTemplateId', (string) $template->id)
+            ->call('addItem')
+            ->assertHasNoErrors()
+            ->set('newItemTemplateId', (string) $template->id)
+            ->set('newItemName', 'Feature Winner')
+            ->call('addItem')
+            ->set('newItemTemplateId', (string) $template->id)
+            ->set('newItemName', 'Interview')
+            ->call('addItem')
+            ->assertHasErrors('newItemName');
+
+        [$first, $second] = $template->items()->get();
+        $this->assertSame(['Interview 1', 'Feature Winner'], [$first->name, $second->name]);
+        $this->assertFalse($first->on_air);
+
+        $copy = $first->groups()->sole();
+        $this->assertSame(['Guest', $group->id], [$copy->name, $copy->template_group_id]);
+        $this->assertSame(['guest', 'topic', 'logo'], $copy->fields->pluck('key')->all());
+        $this->assertSame($driver->id, $copy->fields[0]->template_field_id);
+        $this->assertTrue($copy->fields[0]->needs_update);
+        $this->assertSame('Heat 1 recap', $copy->fields[1]->value);
+
+        $copiedLogo = $copy->fields[2]->value;
+        $this->assertNotSame($logoPath, $copiedLogo);
+        Storage::disk('public')->assertExists([$logoPath, $copiedLogo]);
+
+        $first->deleteWithFiles();
+        Storage::disk('public')->assertMissing($copiedLogo);
+        Storage::disk('public')->assertExists($logoPath);
+    }
+
+    public function test_template_structure_changes_apply_to_every_item(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $template = VmixSection::factory()->template()->create(['key' => 'interview']);
+        $group = VmixGroup::factory()->for($template, 'section')->create(['name' => 'Guest']);
+        $topic = VmixField::factory()->for($group, 'group')->create(['key' => 'topic']);
+        $item = $this->onAirItemOf($template);
+        $this->itemField($item, 'topic')->update(['value' => 'Kept', 'live_value' => 'Kept']);
+
+        Livewire::test('pages::vmix-data', ['selectedSectionId' => $template->id])
+            ->set("groupNames.{$group->id}", 'Driver')
+            ->set("fieldKeys.{$topic->id}", 'question')
+            ->call('toggleNeedsUpdate', $topic->id)
+            ->set("newField.{$group->id}.key", 'car')
+            ->set("newField.{$group->id}.value", '71H')
+            ->call('addField', $group->id)
+            ->set('newGroupName', 'Footer')
+            ->call('addGroup')
+            ->set('sectionKey', 'driver_interview');
+
+        $copy = $item->groups()->where('name', 'Driver')->sole();
+        $question = $this->itemField($item, 'question');
+        $this->assertSame('Kept', $question->value);
+        $this->assertTrue($question->needs_update);
+        $this->assertSame('71H', $this->itemField($item, 'car')->value);
+        $this->assertSame(['Driver', 'Footer'], $item->groups()->pluck('name')->all());
+        $this->assertSame(['question', 'car'], $copy->fields()->pluck('key')->all());
+
+        $this->getJson(route('feeds.data'))
+            ->assertExactJson(['driver_interview' => [['question' => 'Kept', 'car' => '71H']]]);
+
+        Livewire::test('pages::vmix-data', ['selectedSectionId' => $template->id])
+            ->call('deleteField', $topic->id)
+            ->call('deleteGroup', $group->id);
+
+        $this->assertSame(['Footer'], $item->groups()->pluck('name')->all());
+        $this->assertSame(0, VmixField::query()->count());
+    }
+
+    public function test_item_structure_cannot_be_edited(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $template = VmixSection::factory()->template()->create();
+        VmixField::factory()->for(VmixGroup::factory()->for($template, 'section'), 'group')->create(['key' => 'topic']);
+        $item = $template->createItem('Interview 1');
+        $field = $this->itemField($item, 'topic');
+
+        $component = fn () => Livewire::test('pages::vmix-data', ['selectedSectionId' => $item->id]);
+
+        $component()->assertSee('From template')->assertDontSee('Add group');
+        $component()->set('newGroupName', 'Extra')->call('addGroup')->assertForbidden();
+        $component()->call('deleteField', $field->id)->assertForbidden();
+        $component()->call('deleteGroup', $field->vmix_group_id)->assertForbidden();
+        $component()->call('toggleNeedsUpdate', $field->id)->assertForbidden();
+
+        $this->assertModelExists($field);
+        $this->assertSame(1, $item->groups()->count());
+    }
+
+    public function test_only_one_item_per_template_is_on_air(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $interview = VmixSection::factory()->template()->create(['key' => 'interview']);
+        $facts = VmixSection::factory()->template()->create(['key' => 'facts']);
+        $first = VmixSection::factory()->itemOf($interview)->onAir()->create();
+        $second = VmixSection::factory()->itemOf($interview)->create();
+        $fact = VmixSection::factory()->itemOf($facts)->onAir()->create();
+
+        Livewire::test('pages::vmix-data')->call('toggleOnAir', $second->id);
+
+        $this->assertFalse($first->refresh()->on_air);
+        $this->assertTrue($second->refresh()->on_air);
+        $this->assertTrue($fact->refresh()->on_air);
+    }
+
+    public function test_next_and_previous_step_through_the_run_of_show(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $template = VmixSection::factory()->template()->create(['key' => 'interview']);
+        VmixField::factory()->for(VmixGroup::factory()->for($template, 'section'), 'group')->create(['key' => 'guest']);
+        [$first, $second, $third] = collect(['Max', 'Tim', 'Kyle'])->map(function (string $guest, int $index) use ($template) {
+            $item = $template->createItem('Interview '.($index + 1));
+            $this->itemField($item, 'guest')->update(['value' => $guest, 'live_value' => $guest]);
+
+            return $item;
+        });
+
+        $component = Livewire::test('pages::vmix-data')->call('showNext');
+        $this->assertSame([$first->id], VmixSection::query()->where('on_air', true)->pluck('id')->all());
+        $component->assertSet('selectedSectionId', $first->id);
+
+        $component->call('showNext')->call('showNext');
+        $this->assertSame([$third->id], VmixSection::query()->where('on_air', true)->pluck('id')->all());
+        $this->assertSame('Kyle', $this->getJson(route('feeds.data'))->json('interview.0.guest'));
+
+        $component->call('showNext')->assertDispatched('notify');
+        $this->assertTrue($third->refresh()->on_air);
+
+        $component->call('showPrevious');
+        $this->assertSame([$second->id], VmixSection::query()->where('on_air', true)->pluck('id')->all());
+        $this->assertSame('Tim', $this->getJson(route('feeds.data'))->json('interview.0.guest'));
+    }
+
+    public function test_deleting_a_template_deletes_its_items(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $template = VmixSection::factory()->template()->create();
+        VmixField::factory()->for(VmixGroup::factory()->for($template, 'section'), 'group')->create();
+        $item = $this->onAirItemOf($template);
+
+        Livewire::test('pages::vmix-data', ['selectedSectionId' => $template->id])->call('deleteSection');
+
+        $this->assertModelMissing($item);
+        $this->assertSame(0, VmixField::query()->count());
+        $this->assertSame('{}', $this->get(route('feeds.data'))->getContent());
+    }
+
+    public function test_standalone_sections_have_their_own_structure_values_and_key(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $template = VmixSection::factory()->template()->create(['key' => 'interview']);
+        VmixField::factory()->for(VmixGroup::factory()->for($template, 'section'), 'group')->create(['key' => 'guest', 'value' => 'Max']);
+        $this->onAirItemOf($template);
+
+        $component = Livewire::test('pages::vmix-data')
+            ->set('newStandaloneName', 'Weather')
+            ->call('addSection')
+            ->assertHasNoErrors()
+            ->set('newGroupName', 'Now')
+            ->call('addGroup');
+
+        $weather = VmixSection::query()->standalone()->sole();
+        $group = $weather->groups()->sole();
+        $this->assertSame(['weather', false, null], [$weather->key, $weather->is_template, $weather->template_id]);
+        $component->assertSet('selectedSectionId', $weather->id)->assertSee('Section name');
+
+        $component
+            ->set("newField.{$group->id}.key", 'temp')
+            ->set("newField.{$group->id}.value", '72')
+            ->call('addField', $group->id)
+            ->call('toggleOnAir', $weather->id);
+
+        $this->assertTrue($weather->refresh()->on_air);
+        $this->assertTrue($template->items()->sole()->on_air);
+        $this->assertNull(Setting::get(Setting::ShowCurrentItem));
+
+        $this->getJson(route('feeds.data'))->assertExactJson([
+            'weather' => [['temp' => '72']],
+            'interview' => [['guest' => 'Max']],
+        ]);
+
+        $component->set('newStandaloneName', 'Weather')->call('addSection')->assertHasErrors('newStandaloneName');
+        $component->call('toggleOnAir', $template->id)->assertNotFound();
+    }
+
+    public function test_standalone_sections_can_be_dragged_into_a_new_order(): void
+    {
+        $this->actingAs(User::factory()->create());
+        [$first, $second] = collect(['first', 'second'])
+            ->map(fn (string $key, int $index) => VmixSection::factory()->onAir()->create(['key' => $key, 'sort_order' => $index]));
+        foreach ([$first, $second] as $section) {
+            VmixField::factory()->for(VmixGroup::factory()->for($section, 'section'), 'group')->create(['key' => 'title']);
+        }
+
+        Livewire::test('pages::vmix-data')->call('sortStandalone', $second->id, 0);
+
+        $this->assertSame([$second->id, $first->id], VmixSection::query()->standalone()->pluck('id')->all());
+        $this->assertSame(['second', 'first'], array_keys($this->getJson(route('feeds.data'))->json()));
+    }
+
+    public function test_sections_in_the_run_of_show_stay_live_until_turned_off(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $template = VmixSection::factory()->template()->create(['key' => 'interview']);
+        VmixField::factory()->for(VmixGroup::factory()->for($template, 'section'), 'group')->create(['key' => 'guest']);
+        $first = $template->createItem('Interview 1');
+        $weather = VmixSection::factory()->create(['key' => 'weather']);
+        VmixField::factory()->for(VmixGroup::factory()->for($weather, 'section'), 'group')->create(['key' => 'temp', 'value' => '72']);
+
+        $component = Livewire::test('pages::vmix-data')
+            ->set('newItemTemplateId', "section:{$weather->id}")
+            ->call('addItem')
+            ->assertSee('Section · stays live');
+        $second = $template->createItem('Interview 2');
+
+        $this->assertSame([$first->id, $weather->id, $second->id], VmixSection::query()->runOfShow()->pluck('id')->all());
+
+        $component->call('showNext')->call('showNext');
+        $this->assertTrue($weather->refresh()->on_air);
+        $this->assertFalse($first->refresh()->on_air);
+
+        $component->call('showNext');
+        $this->assertTrue($weather->refresh()->on_air);
+        $this->assertTrue($second->refresh()->on_air);
+        $this->assertSame(['weather', 'interview'], array_keys($this->getJson(route('feeds.data'))->json()));
+
+        $component->call('sortItems', $weather->id, 0)->call('removeFromRunOfShow', $weather->id);
+        $this->assertSame([$first->id, $second->id], VmixSection::query()->runOfShow()->pluck('id')->all());
+        $this->assertTrue($weather->refresh()->on_air);
+        $this->assertModelExists($weather);
+
+        $component->call('removeFromRunOfShow', $first->id)->assertNotFound();
+    }
+
+    public function test_dragging_a_section_into_the_run_of_show_adds_it_at_the_drop_position(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $template = VmixSection::factory()->template()->create();
+        $first = $template->createItem('Interview 1');
+        $second = $template->createItem('Interview 2');
+        $weather = VmixSection::factory()->create();
+
+        $component = Livewire::test('pages::vmix-data')->call('sortItems', $weather->id, 1);
+
+        $this->assertSame([$first->id, $weather->id, $second->id], VmixSection::query()->runOfShow()->pluck('id')->all());
+        $this->assertSame(1, VmixSection::query()->standalone()->count());
+
+        $component->call('sortItems', $template->id, 0)->assertNotFound();
+    }
+
+    /**
+     * Copy a template into a new run-of-show item and put it on air.
+     */
+    private function onAirItemOf(VmixSection $template, ?string $name = null): VmixSection
+    {
+        $item = $template->createItem($name ?? $template->nextItemName());
+        $item->putOnAir();
+
+        return $item;
+    }
+
+    private function itemField(VmixSection $item, string $key): VmixField
+    {
+        return VmixField::query()
+            ->where('key', $key)
+            ->whereHas('group', fn ($query) => $query->where('vmix_section_id', $item->id))
+            ->sole();
     }
 }
