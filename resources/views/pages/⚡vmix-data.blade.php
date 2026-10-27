@@ -5,6 +5,7 @@ use App\Models\VmixField;
 use App\Models\VmixGroup;
 use App\Models\VmixSection;
 use App\Services\VmixFeed;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
 use Livewire\Attributes\Computed;
@@ -210,6 +211,25 @@ new #[Title('vMix Data')] class extends Component
             $group->update(['name' => $name]);
         }
 
+        $this->loadSection();
+    }
+
+    /**
+     * Drag-and-drop handler: move a section to a new position. Order is also the order sections appear in the master file.
+     */
+    public function sortSections(int|string $sectionId, int $position): void
+    {
+        $this->moveToPosition(VmixSection::query()->orderBy('sort_order')->orderBy('id')->get(), (int) $sectionId, $position);
+        unset($this->sections);
+    }
+
+    /**
+     * Drag-and-drop handler: move a group within the selected section.
+     */
+    public function sortGroups(int|string $groupId, int $position): void
+    {
+        $this->sectionGroup((int) $groupId);
+        $this->moveToPosition($this->section->groups()->orderBy('sort_order')->orderBy('id')->get(), (int) $groupId, $position);
         $this->loadSection();
     }
 
@@ -439,6 +459,25 @@ new #[Title('vMix Data')] class extends Component
         $this->loadSection();
     }
 
+    /**
+     * Renumber sort_order so the given record lands at the position, keeping everything else in order.
+     *
+     * @param  Collection<int, Model>  $records
+     */
+    protected function moveToPosition(Collection $records, int $id, int $position): void
+    {
+        $moving = $records->firstWhere('id', $id);
+
+        if (! $moving) {
+            return;
+        }
+
+        $records = $records->reject(fn (Model $record) => $record->id === $id)->values();
+        $records->splice(max(0, min($position, $records->count())), 0, [$moving]);
+
+        $records->each(fn (Model $record, int $index) => $record->sort_order === $index ? null : $record->update(['sort_order' => $index]));
+    }
+
     protected function sectionGroup(int $groupId): VmixGroup
     {
         return VmixGroup::query()->where('vmix_section_id', $this->selectedSectionId)->findOrFail($groupId);
@@ -460,17 +499,19 @@ new #[Title('vMix Data')] class extends Component
             <h2 class="text-sm font-bold tracking-wide text-slate-500 uppercase">Sections</h2>
         </div>
 
-        <nav class="space-y-1 p-2">
+        <nav wire:sort="sortSections" class="space-y-1 p-2">
             @forelse ($this->sections as $section)
                 <div
                     wire:key="section-{{ $section->id }}"
+                    wire:sort:item="{{ $section->id }}"
                     @class([
-                        'flex items-center gap-2 rounded-md pr-2',
+                        'flex items-center gap-1 rounded-md pr-2',
                         'bg-amber-400 text-slate-900' => $selectedSectionId === $section->id,
                         'hover:bg-slate-100' => $selectedSectionId !== $section->id,
                     ])
                 >
-                    <button type="button" wire:click="selectSection({{ $section->id }})" class="min-w-0 flex-1 truncate px-3 py-2 text-left text-sm font-bold">
+                    <span wire:sort:handle title="Drag to reorder" class="cursor-grab pl-1.5 text-sm text-slate-400 select-none hover:text-slate-700">&#10303;</span>
+                    <button type="button" wire:click="selectSection({{ $section->id }})" class="min-w-0 flex-1 truncate py-2 pr-3 pl-1 text-left text-sm font-bold">
                         {{ $section->name }}
                     </button>
                     <button
@@ -498,15 +539,14 @@ new #[Title('vMix Data')] class extends Component
 
     {{-- Selected section --}}
     <section class="min-w-0 flex-1 space-y-4">
-        <div x-data="{ copied: false }" class="flex flex-wrap items-center gap-3 rounded-xl bg-slate-900 p-3 text-white shadow-sm">
+        <div class="flex flex-wrap items-center gap-3 rounded-xl bg-slate-900 p-3 text-white shadow-sm">
             <span class="text-xs font-bold tracking-wide text-amber-400 uppercase">Master vMix file</span>
-            <code class="min-w-0 flex-1 truncate rounded bg-slate-800 px-2 py-1.5 text-xs">{{ route('feeds.data') }}</code>
+            <code class="min-w-0 flex-1 truncate rounded bg-slate-800 px-2 py-1.5 text-xs select-all">{{ route('feeds.data') }}</code>
             <button
                 type="button"
-                x-on:click="navigator.clipboard.writeText(@js(route('feeds.data'))); copied = true; setTimeout(() => copied = false, 1500)"
+                x-on:click="copyText(@js(route('feeds.data')), 'master file URL')"
                 class="rounded-md bg-amber-400 px-3 py-1.5 text-xs font-bold text-slate-900"
-                x-text="copied ? 'Copied' : 'Copy URL'"
-            ></button>
+            >Copy URL</button>
             <p class="w-full text-xs text-slate-400">Only sections that are <span class="font-bold text-red-400">ON AIR</span> are in the file. Edits go out as soon as they save.</p>
         </div>
 
@@ -562,10 +602,11 @@ new #[Title('vMix Data')] class extends Component
                 </form>
             </div>
 
-            <div class="grid grid-cols-1 gap-3 xl:grid-cols-2">
+            <div wire:sort="sortGroups" class="grid grid-cols-1 gap-3 xl:grid-cols-2">
                 @forelse ($section->groups as $group)
-                    <div wire:key="group-{{ $group->id }}" class="rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
+                    <div wire:key="group-{{ $group->id }}" wire:sort:item="{{ $group->id }}" class="rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
                         <div class="flex items-center gap-2 border-b border-slate-100 p-2">
+                            <span wire:sort:handle title="Drag to reorder" class="cursor-grab px-1 text-base text-slate-400 select-none hover:text-slate-700">&#10303;</span>
                             <input
                                 wire:model.blur="groupNames.{{ $group->id }}"
                                 x-on:keydown.enter.prevent="$el.blur()"

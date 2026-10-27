@@ -196,14 +196,13 @@ new #[Title('vMix')] class extends Component
                     </label>
                 @endif
 
-                <div x-data="{ copied: false }" class="flex items-center gap-2">
-                    <code class="flex-1 truncate rounded bg-slate-100 px-2 py-1.5 text-xs">{{ route($feed['route']) }}</code>
+                <div class="flex items-center gap-2">
+                    <code class="flex-1 truncate rounded bg-slate-100 px-2 py-1.5 text-xs select-all">{{ route($feed['route']) }}</code>
                     <button
                         type="button"
-                        x-on:click="navigator.clipboard.writeText(@js(route($feed['route']))); copied = true; setTimeout(() => copied = false, 1500)"
+                        x-on:click="copyText(@js(route($feed['route'])), @js(strtolower($feed['title']).' URL'))"
                         class="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white"
-                        x-text="copied ? 'Copied' : 'Copy URL'"
-                    ></button>
+                    >Copy URL</button>
                     <a href="{{ route($feed['route']) }}" target="_blank" class="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-slate-300">Open</a>
                 </div>
             </div>

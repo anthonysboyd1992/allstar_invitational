@@ -455,6 +455,37 @@ class VmixDataTest extends TestCase
         $this->assertSame('{}', $this->get(route('feeds.data'))->assertOk()->getContent());
     }
 
+    public function test_sections_can_be_dragged_into_a_new_order(): void
+    {
+        $this->actingAs(User::factory()->create());
+        [$first, $second, $third] = collect(['first', 'second', 'third'])
+            ->map(fn (string $key, int $index) => VmixSection::factory()->onAir()->create(['key' => $key, 'sort_order' => $index]));
+        foreach ([$first, $second, $third] as $section) {
+            VmixField::factory()->for(VmixGroup::factory()->for($section, 'section'), 'group')->create(['key' => 'title']);
+        }
+
+        Livewire::test('pages::vmix-data')->call('sortSections', $third->id, 0);
+
+        $this->assertSame([$third->id, $first->id, $second->id], VmixSection::query()->orderBy('sort_order')->pluck('id')->all());
+        $this->assertSame(['third', 'first', 'second'], array_keys($this->getJson(route('feeds.data'))->json()));
+    }
+
+    public function test_groups_can_be_dragged_into_a_new_order_within_their_section(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $section = VmixSection::factory()->create();
+        [$heading, $data, $footer] = collect(['Heading', 'Data', 'Footer'])
+            ->map(fn (string $name, int $index) => VmixGroup::factory()->for($section, 'section')->create(['name' => $name, 'sort_order' => $index]));
+        $otherGroup = VmixGroup::factory()->create();
+
+        $component = Livewire::test('pages::vmix-data', ['selectedSectionId' => $section->id])
+            ->call('sortGroups', $heading->id, 2);
+
+        $this->assertSame([$data->id, $footer->id, $heading->id], $section->groups()->pluck('id')->all());
+
+        $component->call('sortGroups', $otherGroup->id, 0)->assertNotFound();
+    }
+
     public function test_color_fields_save_hex_values_live(): void
     {
         $this->actingAs(User::factory()->create());
