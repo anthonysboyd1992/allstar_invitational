@@ -401,7 +401,7 @@ new #[Title('Races & Lineups')] class extends Component
                             'opacity-50' => $inLiveRace,
                         ])
                     >
-                        <span class="w-10 shrink-0 rounded bg-slate-900 py-0.5 text-center text-xs font-black text-white">{{ $competitor->car_number ?: '—' }}</span>
+                        <span class="w-10 shrink-0 rounded bg-slate-900 py-0.5 text-center text-xs font-black text-white">{{ filled($competitor->car_number) ? $competitor->car_number : '—' }}</span>
                         <span class="min-w-0 flex-1">
                             <span class="block truncate font-semibold">{{ $competitor->full_name }}</span>
                             <span class="block text-xs text-slate-400">
@@ -526,7 +526,7 @@ new #[Title('Races & Lineups')] class extends Component
                                         class="flex min-w-0 cursor-grab items-center gap-1.5 rounded-md border border-slate-200 bg-white px-1.5 py-1 text-sm hover:border-amber-400"
                                     >
                                         <span class="w-4 shrink-0 text-right text-xs font-bold text-slate-400">{{ $entry->start_position }}</span>
-                                        <span class="w-9 shrink-0 rounded bg-slate-900 py-0.5 text-center text-xs font-black text-white">{{ $entry->competitor->car_number ?: '—' }}</span>
+                                        <span class="w-9 shrink-0 rounded bg-slate-900 py-0.5 text-center text-xs font-black text-white">{{ filled($entry->competitor->car_number) ? $entry->competitor->car_number : '—' }}</span>
                                         <span class="min-w-0 flex-1 truncate">{{ $entry->competitor->full_name }}</span>
                                         <button
                                             type="button"

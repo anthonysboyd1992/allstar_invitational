@@ -319,6 +319,36 @@ class VmixDataTest extends TestCase
         $this->assertSame(VmixFeed::clearUrl(256, 256), $row['ringer_1_headshot']);
     }
 
+    public function test_driver_lookup_and_feed_include_car_number_zero(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $template = VmixSection::factory()->template()->create(['key' => 'interview']);
+        $group = VmixGroup::factory()->for($template, 'section')->create();
+        $driver = Competitor::factory()->create([
+            'car_number' => '0',
+            'first_name' => 'Zero',
+            'last_name' => 'Car',
+        ]);
+
+        Livewire::test('pages::vmix-data', ['selectedSectionId' => $template->id])
+            ->set("newField.{$group->id}.type", 'driver')
+            ->assertSee('#0 Zero Car')
+            ->set("newField.{$group->id}.key", 'guest')
+            ->set("newField.{$group->id}.value", (string) $driver->id)
+            ->call('addField', $group->id);
+
+        $section = $this->onAirItemOf($template);
+        $this->itemField($section, 'guest')->update([
+            'value' => (string) $driver->id,
+            'live_value' => (string) $driver->id,
+        ]);
+
+        $this->assertSame('0', $this->getJson(route('feeds.data'))->json('interview.0')['guest_number']);
+
+        Livewire::test('pages::vmix-data', ['selectedSectionId' => $section->id])
+            ->assertSee('#0 Zero Car');
+    }
+
     public function test_manual_fields_wait_for_update_and_show_what_is_on_air(): void
     {
         $this->actingAs(User::factory()->create());

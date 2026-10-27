@@ -112,6 +112,14 @@ class Competitor extends Model
     }
 
     /**
+     * "#0 Last First" in lookups. Car number 0 is a real number; only a missing number is omitted.
+     */
+    public function labeledName(): string
+    {
+        return filled($this->car_number) ? '#'.$this->car_number.' '.$this->full_name : $this->full_name;
+    }
+
+    /**
      * Key used by graphics to find the driver's headshot, e.g. "LeythamGat5GIMCAModified".
      */
     public function driverKey(string $className): string

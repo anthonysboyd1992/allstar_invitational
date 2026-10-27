@@ -243,7 +243,7 @@
                                             >
                                                 <option value="">— No driver —</option>
                                                 @foreach ($this->drivers as $option)
-                                                    <option value="{{ $option->id }}">{{ $option->car_number ? '#'.$option->car_number.' ' : '' }}{{ $option->full_name }}</option>
+                                                    <option value="{{ $option->id }}">{{ $option->labeledName() }}</option>
                                                 @endforeach
                                             </select>
                                             <span class="shrink-0 font-mono text-[10px] text-slate-400" title="{{ collect(\App\Models\VmixField::DriverKeySuffixes)->map(fn ($suffix) => $field->key.'_'.$suffix)->implode(', ') }}">{{ $field->key }}_*</span>
@@ -318,7 +318,7 @@
                                             @endif
                                         @elseif ($field->isDriver())
                                             @php($liveDriver = $this->drivers->firstWhere('id', (int) $field->live_value))
-                                            <span class="font-semibold text-slate-700">{{ $liveDriver ? ($liveDriver->car_number ? '#'.$liveDriver->car_number.' ' : '').$liveDriver->full_name : 'No driver' }}</span>
+                                            <span class="font-semibold text-slate-700">{{ $liveDriver ? $liveDriver->labeledName() : 'No driver' }}</span>
                                         @elseif ($field->isColor() && filled($field->live_value))
                                             <span class="size-4 rounded ring-1 ring-slate-300" style="background-color: {{ $field->live_value }}"></span>
                                             <span class="font-mono font-semibold text-slate-700">{{ $field->live_value }}</span>
@@ -352,7 +352,7 @@
                                     <select wire:model="newField.{{ $group->id }}.value" class="min-w-0 flex-1 rounded border border-dashed border-slate-300 bg-white px-1 py-1 text-sm focus:border-amber-500 focus:outline-none">
                                         <option value="">— No driver —</option>
                                         @foreach ($this->drivers as $option)
-                                            <option value="{{ $option->id }}">{{ $option->car_number ? '#'.$option->car_number.' ' : '' }}{{ $option->full_name }}</option>
+                                            <option value="{{ $option->id }}">{{ $option->labeledName() }}</option>
                                         @endforeach
                                     </select>
                                 @elseif (($newField[$group->id]['type'] ?? \App\Models\VmixField::TypeText) === \App\Models\VmixField::TypeColor)

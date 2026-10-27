@@ -934,16 +934,17 @@ new #[Title('vMix Data')] class extends Component
 ?>
 
 <div class="space-y-4">
-    <div class="sticky top-14 z-20 space-y-2">
-        <div class="flex flex-wrap items-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-white shadow-sm ring-1 ring-slate-800">
-            <span class="text-[10px] font-black tracking-[0.18em] text-amber-400 uppercase">vMix</span>
-            <a href="{{ route('feeds.data') }}" target="_blank" class="min-w-0 flex-1 truncate font-mono text-xs text-slate-300 hover:text-white">{{ route('feeds.data') }}</a>
-            <button
-                type="button"
-                x-on:click="copyText(@js(route('feeds.data')), 'vMix URL')"
-                class="rounded-md bg-amber-400 px-2.5 py-1 text-[11px] font-black text-slate-900"
-            >Copy</button>
-        </div>
+    <div class="sticky top-14 z-20">
+        <div class="overflow-hidden rounded-lg bg-slate-950 text-white shadow-sm ring-1 ring-slate-800">
+            <div class="flex items-center gap-2 border-b border-slate-800 px-2 py-1">
+                <span class="text-[9px] font-black tracking-[0.18em] text-amber-400 uppercase">vMix</span>
+                <a href="{{ route('feeds.data') }}" target="_blank" class="min-w-0 flex-1 truncate font-mono text-[11px] text-slate-400 hover:text-white">{{ route('feeds.data') }}</a>
+                <button
+                    type="button"
+                    x-on:click="copyText(@js(route('feeds.data')), 'vMix URL')"
+                    class="rounded bg-amber-400 px-1.5 py-0.5 text-[10px] font-black text-slate-900"
+                >Copy</button>
+            </div>
     @php($liveBreak = $this->liveBreak)
     <div
         wire:key="clock-{{ $liveBreak?->id }}-{{ $liveBreak?->breakEndsAt()?->getTimestampMs() }}"
@@ -966,40 +967,34 @@ new #[Title('vMix Data')] class extends Component
             },
             destroy() { clearInterval(this.timer) },
         }"
-            class="grid grid-cols-1 gap-3 rounded-xl bg-slate-950 p-3 text-white shadow-sm ring-1 ring-slate-800 sm:grid-cols-2 xl:grid-cols-[auto_minmax(10rem,16rem)_minmax(16rem,1fr)_minmax(16rem,20rem)]"
+            class="grid grid-cols-1 gap-1 p-1 sm:grid-cols-2 xl:grid-cols-[auto_minmax(8rem,14rem)_minmax(12rem,1fr)_minmax(10rem,16rem)]"
     >
-        <div class="flex flex-col justify-center rounded-lg bg-slate-900 px-4 py-3 ring-1 ring-slate-800">
-            <span class="text-[10px] font-black tracking-[0.18em] text-slate-500 uppercase">Time</span>
-            <span x-text="time" class="font-mono text-3xl leading-none font-black tabular-nums"></span>
+        <div class="flex items-baseline gap-2 rounded bg-slate-900 px-2 py-1 ring-1 ring-slate-800">
+            <span class="text-[9px] font-black tracking-[0.16em] text-slate-500 uppercase">Time</span>
+            <span x-text="time" class="font-mono text-lg leading-none font-black tabular-nums"></span>
         </div>
 
         @php($currentEntry = $this->currentEntry)
         @php($upNext = $this->upNext)
-        <div class="flex min-w-0 flex-col justify-center rounded-lg bg-slate-900 px-4 py-3 ring-1 ring-slate-800">
-            <div class="flex items-center gap-2">
-                <span class="text-[10px] font-black tracking-[0.18em] text-slate-500 uppercase">Now</span>
-                @if ($currentEntry?->on_air)
-                    <span class="rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-black tracking-wide">ON AIR</span>
-                @endif
-            </div>
+        <div class="flex min-w-0 items-center gap-2 rounded bg-slate-900 px-2 py-1 ring-1 ring-slate-800">
+            <span class="shrink-0 text-[9px] font-black tracking-[0.16em] text-slate-500 uppercase">Now</span>
+            @if ($currentEntry?->on_air)
+                <span class="shrink-0 rounded bg-red-600 px-1 py-px text-[9px] font-black tracking-wide">ON AIR</span>
+            @endif
             @if ($currentEntry)
-                <button type="button" wire:click="selectSection({{ $currentEntry->id }})" class="mt-1 max-w-full truncate text-left text-lg leading-tight font-black hover:text-amber-300">{{ $currentEntry->name }}</button>
-                <span class="mt-0.5 truncate text-[11px] font-semibold tracking-wide text-slate-400 uppercase">{{ $currentEntry->runOfShowLabel() }}</span>
-                @include('pages.vmix-description-bullets', ['lines' => $currentEntry->descriptionLines(), 'class' => 'mt-1 text-xs text-slate-400'])
+                <button type="button" wire:click="selectSection({{ $currentEntry->id }})" class="min-w-0 truncate text-left text-sm font-black hover:text-amber-300">{{ $currentEntry->name }}</button>
             @else
-                <span class="mt-1 text-lg font-black text-slate-600">Nothing current</span>
+                <span class="truncate text-sm font-black text-slate-600">Nothing current</span>
             @endif
         </div>
 
-        <div class="flex min-w-0 items-stretch gap-2 sm:col-span-2 xl:col-span-1">
-            <div class="flex min-w-0 flex-1 flex-col justify-center rounded-lg bg-amber-400 px-4 py-3 text-slate-950 shadow-[0_0_0_1px_rgb(251_191_36)]">
-                <span class="text-[10px] font-black tracking-[0.22em] uppercase">Up next</span>
+        <div class="flex min-w-0 items-stretch gap-1 sm:col-span-2 xl:col-span-1">
+            <div class="flex min-w-0 flex-1 items-center gap-2 rounded bg-amber-400 px-2 py-1 text-slate-950">
+                <span class="shrink-0 text-[9px] font-black tracking-[0.16em] uppercase">Up next</span>
                 @if ($upNext)
-                    <button type="button" wire:click="selectSection({{ $upNext->id }})" class="mt-1 max-w-full truncate text-left text-2xl leading-tight font-black">{{ $upNext->name }}</button>
-                    <span class="mt-0.5 truncate text-xs font-bold tracking-wide text-slate-800 uppercase">{{ $upNext->runOfShowLabel() }}</span>
-                    @include('pages.vmix-description-bullets', ['lines' => $upNext->descriptionLines(), 'class' => 'mt-1 text-sm text-slate-800'])
+                    <button type="button" wire:click="selectSection({{ $upNext->id }})" class="min-w-0 truncate text-left text-sm font-black">{{ $upNext->name }}</button>
                 @else
-                    <span class="mt-1 text-2xl leading-tight font-black text-slate-700">End of show</span>
+                    <span class="truncate text-sm font-black text-slate-700">End of show</span>
                 @endif
             </div>
             <button
@@ -1007,16 +1002,13 @@ new #[Title('vMix Data')] class extends Component
                 wire:click="showNext"
                 @disabled(! $upNext)
                 title="Put the next entry on air"
-                class="flex shrink-0 flex-col items-center justify-center rounded-lg bg-red-600 px-5 text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
-            >
-                <span class="text-[10px] font-black tracking-[0.18em] uppercase opacity-80">Go</span>
-                <span class="text-xl leading-none font-black">Next &#9654;</span>
-            </button>
+                class="shrink-0 rounded bg-red-600 px-2.5 text-xs font-black text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
+            >Next &#9654;</button>
         </div>
 
         @if ($liveBreak)
             <div
-                class="flex min-w-0 items-center justify-between gap-4 rounded-lg px-4 py-3 transition-colors duration-300 sm:col-span-2 xl:col-span-1"
+                class="flex min-w-0 items-center justify-between gap-2 rounded px-2 py-1 transition-colors duration-300 sm:col-span-2 xl:col-span-1"
                 x-bind:class="{
                     'bg-slate-900 text-white ring-1 ring-slate-800': remaining > 60,
                     'bg-lime-400 text-slate-950': remaining <= 60 && remaining > 45,
@@ -1027,19 +1019,17 @@ new #[Title('vMix Data')] class extends Component
                     'bg-red-600 text-white animate-pulse': remaining <= 5,
                 }"
             >
-                <div class="min-w-0">
-                    <span class="block truncate text-[10px] font-black tracking-[0.18em] uppercase opacity-80">{{ $liveBreak->name }} · {{ VmixSection::formatSeconds($liveBreak->break_seconds) }}</span>
-                    <span x-text="remaining < 0 ? 'Over' : 'Remaining'" class="block text-xs font-bold"></span>
-                </div>
-                <span x-text="countdown" class="shrink-0 font-mono text-5xl leading-none font-black tabular-nums"></span>
+                <span class="min-w-0 truncate text-[9px] font-black tracking-[0.16em] uppercase opacity-80">{{ $liveBreak->name }} · {{ VmixSection::formatSeconds($liveBreak->break_seconds) }} <span x-text="remaining < 0 ? 'Over' : 'Remaining'" class="font-bold tracking-normal normal-case"></span></span>
+                <span x-text="countdown" class="shrink-0 font-mono text-xl leading-none font-black tabular-nums"></span>
             </div>
         @else
-            <div class="flex min-w-0 flex-col justify-center rounded-lg bg-slate-900 px-4 py-3 ring-1 ring-slate-800 sm:col-span-2 xl:col-span-1">
-                <span class="text-[10px] font-black tracking-[0.18em] text-slate-500 uppercase">Break</span>
-                <span class="mt-1 text-lg font-black text-slate-600">Idle</span>
+            <div class="flex min-w-0 items-center gap-2 rounded bg-slate-900 px-2 py-1 ring-1 ring-slate-800 sm:col-span-2 xl:col-span-1">
+                <span class="text-[9px] font-black tracking-[0.16em] text-slate-500 uppercase">Break</span>
+                <span class="text-sm font-black text-slate-600">Idle</span>
             </div>
         @endif
     </div>
+        </div>
     </div>
     <div class="flex items-start gap-4">
         <aside class="w-72 shrink-0 space-y-4">
