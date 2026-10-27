@@ -37,6 +37,8 @@ new #[Title('vMix Data')] class extends Component
 
     public string $newBreakSeconds = '300';
 
+    public string $newPlaceholderName = '';
+
     public string $breakSeconds = '';
 
     public string $newGroupName = '';
@@ -45,6 +47,9 @@ new #[Title('vMix Data')] class extends Component
     public array $newField = [];
 
     public string $sectionName = '';
+
+    /** @var list<string> */
+    public array $sectionDescriptionLines = [];
 
     public string $sectionKey = '';
 
@@ -89,6 +94,7 @@ new #[Title('vMix Data')] class extends Component
         $section = $this->section;
 
         $this->sectionName = (string) $section?->name;
+        $this->sectionDescriptionLines = $this->descriptionLinesForEditor($section);
         $this->sectionKey = (string) $section?->key;
         $this->breakSeconds = (string) $section?->break_seconds;
         $this->groupNames = $section?->groups->mapWithKeys(fn (VmixGroup $group) => [$group->id => $group->name])->all() ?? [];
@@ -315,6 +321,22 @@ new #[Title('vMix Data')] class extends Component
         $this->selectSection($break->id);
     }
 
+    public function addPlaceholder(): void
+    {
+        $this->newPlaceholderName = trim($this->newPlaceholderName) ?: VmixSection::nextPlaceholderName();
+
+        $this->validate(
+            ['newPlaceholderName' => ['required', 'string', 'max:100', 'unique:vmix_sections,name']],
+            ['newPlaceholderName.unique' => 'That name is already used by a section, template or item.'],
+            ['newPlaceholderName' => 'placeholder name'],
+        );
+
+        $placeholder = VmixSection::createPlaceholder($this->newPlaceholderName);
+
+        $this->reset('newPlaceholderName');
+        $this->selectSection($placeholder->id);
+    }
+
     public function updatedBreakSeconds(string $seconds): void
     {
         $validator = Validator::make(['seconds' => $seconds], ['seconds' => ['required', 'integer', 'min:1', 'max:86400']]);
@@ -337,6 +359,79 @@ new #[Title('vMix Data')] class extends Component
             $this->dispatch('notify', message: 'There is already a section with that name.', type: 'error');
         } elseif ($name !== '') {
             $this->section?->update(['name' => $name]);
+        }
+
+        $this->loadSection();
+    }
+
+    public function updatedSectionDescriptionLines(): void
+    {
+        $this->saveDescriptionLines();
+    }
+
+    public function addDescriptionLine(): void
+    {
+        if (count($this->filledDescriptionLines()) >= VmixSection::DescriptionLineLimit) {
+            return;
+        }
+
+        if (trim((string) last($this->sectionDescriptionLines)) !== '') {
+            $this->sectionDescriptionLines[] = '';
+        }
+    }
+
+    public function removeDescriptionLine(int $index): void
+    {
+        if (! array_key_exists($index, $this->sectionDescriptionLines)) {
+            return;
+        }
+
+        unset($this->sectionDescriptionLines[$index]);
+        $this->sectionDescriptionLines = array_values($this->sectionDescriptionLines);
+        $this->saveDescriptionLines();
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function filledDescriptionLines(): array
+    {
+        return collect($this->sectionDescriptionLines)
+            ->map(fn (mixed $line): string => trim((string) $line))
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function descriptionLinesForEditor(?VmixSection $section): array
+    {
+        $lines = $section?->descriptionLines() ?? [];
+
+        return count($lines) >= VmixSection::DescriptionLineLimit
+            ? $lines
+            : [...$lines, ''];
+    }
+
+    protected function saveDescriptionLines(): void
+    {
+        $lines = $this->filledDescriptionLines();
+
+        $validator = Validator::make(
+            ['sectionDescriptionLines' => $lines],
+            [
+                'sectionDescriptionLines' => ['array', 'max:'.VmixSection::DescriptionLineLimit],
+                'sectionDescriptionLines.*' => ['string', 'max:'.VmixSection::DescriptionLineMax],
+            ],
+            attributes: ['sectionDescriptionLines' => 'description', 'sectionDescriptionLines.*' => 'description line'],
+        );
+
+        if ($validator->fails()) {
+            $this->dispatch('notify', message: $validator->errors()->first(), type: 'error');
+        } else {
+            $this->section?->update(['description' => $lines === [] ? null : implode("\n", $lines)]);
         }
 
         $this->loadSection();
@@ -382,6 +477,30 @@ new #[Title('vMix Data')] class extends Component
         unset($this->runOfShow, $this->standaloneSections, $this->currentItemId, $this->section, $this->liveBreak, $this->currentEntry, $this->upNext);
     }
 
+    /**
+     * Double-click a run-of-show entry to put it on air (or make a placeholder current) and select it.
+     */
+    public function goLive(int $sectionId): void
+    {
+        $section = VmixSection::query()->where('is_template', false)->findOrFail($sectionId);
+        $current = $this->currentItemId ? VmixSection::query()->find($this->currentItemId) : null;
+
+        if ($current && $current->id !== $section->id && ($current->isItem() || $current->isBreak())) {
+            $current->update(['on_air' => false]);
+        }
+
+        if (! $section->isPlaceholder()) {
+            $section->putOnAir();
+        }
+
+        if ($section->isInRunOfShow()) {
+            Setting::put(Setting::ShowCurrentItem, (string) $section->id);
+        }
+
+        unset($this->runOfShow, $this->standaloneSections, $this->currentItemId, $this->liveBreak, $this->currentEntry, $this->upNext);
+        $this->selectSection($section->id);
+    }
+
     public function showNext(): void
     {
         $this->step(1);
@@ -393,13 +512,13 @@ new #[Title('vMix Data')] class extends Component
     }
 
     /**
-     * Take a standalone section out of the run of show (it stays in the sections list and keeps its on-air state), or delete a break.
+     * Take a standalone section out of the run of show (it stays in the sections list and keeps its on-air state), or delete a break or placeholder.
      */
     public function removeFromRunOfShow(int $sectionId): void
     {
         $section = VmixSection::query()->whereNull('template_id')->where('is_template', false)->findOrFail($sectionId);
 
-        if ($section->isBreak()) {
+        if ($section->isBreak() || $section->isPlaceholder()) {
             $section->delete();
 
             if ($this->selectedSectionId === $section->id) {
@@ -433,7 +552,10 @@ new #[Title('vMix Data')] class extends Component
             $items->get($currentIndex)->update(['on_air' => false]);
         }
 
-        $target->putOnAir();
+        if (! $target->isPlaceholder()) {
+            $target->putOnAir();
+        }
+
         Setting::put(Setting::ShowCurrentItem, (string) $target->id);
 
         $this->selectSection($target->id);
@@ -787,7 +909,7 @@ new #[Title('vMix Data')] class extends Component
      */
     protected function requireOwnStructure(): void
     {
-        abort_if(! $this->section || $this->section->isItem() || $this->section->isBreak(), 403, 'Change the structure on the template.');
+        abort_if(! $this->section || $this->section->isItem() || $this->section->isBreak() || $this->section->isPlaceholder(), 403, 'Change the structure on the template.');
     }
 
     protected function firstSectionId(): ?int
@@ -863,6 +985,7 @@ new #[Title('vMix Data')] class extends Component
             @if ($currentEntry)
                 <button type="button" wire:click="selectSection({{ $currentEntry->id }})" class="mt-1 max-w-full truncate text-left text-lg leading-tight font-black hover:text-amber-300">{{ $currentEntry->name }}</button>
                 <span class="mt-0.5 truncate text-[11px] font-semibold tracking-wide text-slate-400 uppercase">{{ $currentEntry->runOfShowLabel() }}</span>
+                @include('pages.vmix-description-bullets', ['lines' => $currentEntry->descriptionLines(), 'class' => 'mt-1 text-xs text-slate-400'])
             @else
                 <span class="mt-1 text-lg font-black text-slate-600">Nothing current</span>
             @endif
@@ -874,6 +997,7 @@ new #[Title('vMix Data')] class extends Component
                 @if ($upNext)
                     <button type="button" wire:click="selectSection({{ $upNext->id }})" class="mt-1 max-w-full truncate text-left text-2xl leading-tight font-black">{{ $upNext->name }}</button>
                     <span class="mt-0.5 truncate text-xs font-bold tracking-wide text-slate-800 uppercase">{{ $upNext->runOfShowLabel() }}</span>
+                    @include('pages.vmix-description-bullets', ['lines' => $upNext->descriptionLines(), 'class' => 'mt-1 text-sm text-slate-800'])
                 @else
                     <span class="mt-1 text-2xl leading-tight font-black text-slate-700">End of show</span>
                 @endif
@@ -953,6 +1077,11 @@ new #[Title('vMix Data')] class extends Component
                 </div>
                 @error('newBreakSeconds') <span class="block text-xs text-red-600">{{ $message }}</span> @enderror
             </form>
+            <form wire:submit="addPlaceholder" class="border-t border-slate-200 p-3">
+                <input wire:model="newPlaceholderName" placeholder="Placeholder name, e.g. Feature winner" class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
+                @error('newPlaceholderName') <span class="mt-1 block text-xs text-red-600">{{ $message }}</span> @enderror
+                <button type="submit" wire:loading.attr="disabled" wire:target="addPlaceholder" class="mt-2 w-full rounded-md bg-slate-100 py-1.5 text-sm font-semibold hover:bg-slate-200 disabled:opacity-50">Add placeholder</button>
+            </form>
         </div>
 
         {{-- Standalone sections --}}
@@ -973,8 +1102,12 @@ new #[Title('vMix Data')] class extends Component
                         ])
                     >
                         <span wire:sort:handle title="Drag to reorder" class="cursor-grab pl-1.5 text-sm text-slate-400 select-none hover:text-slate-700">&#10303;</span>
-                        <button type="button" wire:click="selectSection({{ $standalone->id }})" class="min-w-0 flex-1 truncate py-2 pr-2 pl-1 text-left text-sm font-bold">
-                            {{ $standalone->name }}
+                        <button type="button" wire:click="selectSection({{ $standalone->id }})" class="min-w-0 flex-1 py-2 pr-2 pl-1 text-left">
+                            <span class="block truncate text-sm font-bold">{{ $standalone->name }}</span>
+                            @include('pages.vmix-description-bullets', [
+                                'lines' => $standalone->descriptionLines(),
+                                'class' => $selectedSectionId === $standalone->id ? 'mt-1 text-xs font-normal text-slate-700' : 'mt-1 text-xs font-normal text-slate-400',
+                            ])
                         </button>
                         <button
                             type="button"
@@ -1020,8 +1153,12 @@ new #[Title('vMix Data')] class extends Component
                         ])
                     >
                         <span wire:sort:handle title="Drag to reorder" class="cursor-grab pl-1.5 text-sm text-slate-400 select-none hover:text-slate-700">&#10303;</span>
-                        <button type="button" wire:click="selectSection({{ $template->id }})" class="min-w-0 flex-1 truncate py-2 pr-2 pl-1 text-left text-sm font-bold">
-                            {{ $template->name }}
+                        <button type="button" wire:click="selectSection({{ $template->id }})" class="min-w-0 flex-1 py-2 pr-2 pl-1 text-left">
+                            <span class="block truncate text-sm font-bold">{{ $template->name }}</span>
+                            @include('pages.vmix-description-bullets', [
+                                'lines' => $template->descriptionLines(),
+                                'class' => $selectedSectionId === $template->id ? 'mt-1 text-xs font-normal text-slate-700' : 'mt-1 text-xs font-normal text-slate-400',
+                            ])
                         </button>
                         <span class="shrink-0 font-mono text-[10px] text-slate-400">{{ $template->items_count }} {{ Str::plural('item', $template->items_count) }}</span>
                     </div>
@@ -1062,12 +1199,23 @@ new #[Title('vMix Data')] class extends Component
                         <div @class(['flex items-center gap-2 px-2 py-1', 'bg-amber-400 text-slate-900' => $selectedSectionId === $item->id])>
                         <span wire:sort:handle title="Drag to reorder" class="cursor-grab px-1 text-base text-slate-400 select-none hover:text-slate-700">&#10303;</span>
                         <span @class(['w-8 shrink-0 text-center font-mono text-sm font-black tabular-nums', 'text-slate-900' => $selectedSectionId === $item->id, 'text-slate-400' => $selectedSectionId !== $item->id])>{{ sprintf('%02d', $index + 1) }}</span>
-                        <button type="button" wire:click="toggleSection({{ $item->id }})" class="min-w-0 flex-1 py-2 pr-2 text-left">
+                        <button
+                            type="button"
+                            x-data="{ clickTimer: null }"
+                            x-on:click="clearTimeout(clickTimer); clickTimer = setTimeout(() => $wire.toggleSection({{ $item->id }}), 300)"
+                            x-on:dblclick.prevent="clearTimeout(clickTimer); $wire.goLive({{ $item->id }})"
+                            title="Click to open. Double-click to put on air."
+                            class="min-w-0 flex-1 py-2 pr-2 text-left"
+                        >
                             <span class="flex items-center gap-2">
                                 <span @class(['inline-block text-[10px] leading-none transition-transform', 'rotate-90' => $selectedSectionId === $item->id])>&#9654;</span>
                                 <span class="min-w-0">
                                     <span class="block truncate text-base font-black">{{ $item->name }}</span>
                                     <span @class(['block truncate text-xs font-semibold uppercase', 'text-slate-700' => $selectedSectionId === $item->id, 'text-slate-400' => $selectedSectionId !== $item->id])>{{ $item->runOfShowLabel() }}</span>
+                                    @include('pages.vmix-description-bullets', [
+                                        'lines' => $item->descriptionLines(),
+                                        'class' => $selectedSectionId === $item->id ? 'mt-1 text-xs font-normal normal-case text-slate-700' : 'mt-1 text-xs font-normal normal-case text-slate-500',
+                                    ])
                                 </span>
                             </span>
                         </button>
@@ -1075,11 +1223,12 @@ new #[Title('vMix Data')] class extends Component
                             <button
                                 type="button"
                                 wire:click="removeFromRunOfShow({{ $item->id }})"
-                                @if ($item->isBreak()) wire:confirm="Delete {{ $item->name }}?" @endif
-                                title="{{ $item->isBreak() ? 'Delete this break' : 'Remove from the run of show (keeps the section and its on-air state)' }}"
+                                @if ($item->isBreak() || $item->isPlaceholder()) wire:confirm="Delete {{ $item->name }}?" @endif
+                                title="{{ match (true) { $item->isBreak() => 'Delete this break', $item->isPlaceholder() => 'Delete this placeholder', default => 'Remove from the run of show (keeps the section and its on-air state)' } }}"
                                 class="shrink-0 rounded px-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
                             >&times;</button>
                         @endunless
+                        @unless ($item->isPlaceholder())
                         <button
                             type="button"
                             wire:click="toggleOnAir({{ $item->id }})"
@@ -1090,6 +1239,7 @@ new #[Title('vMix Data')] class extends Component
                                 'bg-slate-200 text-slate-500 hover:bg-slate-300' => ! $item->on_air,
                             ])
                         >{{ $item->on_air ? ($item->isBreak() ? 'ON' : 'ON AIR') : 'OFF' }}</button>
+                        @endunless
                         </div>
                         @if ($selectedSectionId === $item->id && ($section = $this->section))
                             <div wire:sort:ignore class="border-t border-amber-300/60 bg-white p-3">

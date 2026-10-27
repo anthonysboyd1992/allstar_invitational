@@ -1,4 +1,26 @@
-        @if ($section->isBreak())
+        @if ($section->isPlaceholder())
+            <div class="rounded-xl bg-slate-50 p-4 ring-1 ring-dashed ring-slate-300">
+                <div class="flex flex-wrap items-end gap-3">
+                    <label class="block">
+                        <span class="text-xs font-semibold text-slate-500">Placeholder name</span>
+                        <input
+                            wire:model.blur="sectionName"
+                            x-on:keydown.enter.prevent="$el.blur()"
+                            class="mt-0.5 block w-56 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-lg font-black focus:border-amber-500 focus:outline-none"
+                        >
+                    </label>
+                    <div class="flex-1"></div>
+                    <button
+                        type="button"
+                        wire:click="deleteSection"
+                        wire:confirm="Delete {{ $section->name }}?"
+                        class="rounded-md px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50"
+                    >Delete placeholder</button>
+                </div>
+                @include('pages.vmix-description-editor')
+                <p class="mt-3 border-t border-slate-200 pt-3 text-xs text-slate-400">This is a slot in the run of show with no data fields. It is not in the vMix master file. Use it as a reminder, then add a real item or section when you have the values.</p>
+            </div>
+        @elseif ($section->isBreak())
             <div class="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
                 <div class="flex flex-wrap items-end gap-3">
                     <label class="block">
@@ -40,6 +62,7 @@
                         class="rounded-md px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50"
                     >Delete break</button>
                 </div>
+                @include('pages.vmix-description-editor')
                 <p class="mt-3 border-t border-slate-100 pt-3 text-xs text-slate-400">The countdown starts when the break goes on, from Start break or Next in the run of show, and shows at the top of this page. When it reaches zero the break ends and the next run-of-show entry goes on air if it isn't already. Breaks are not in the vMix master file.</p>
             </div>
         @else
@@ -101,6 +124,7 @@
                         class="rounded-md px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50"
                     >{{ $isTemplate ? 'Delete template' : ($ownsStructure ? 'Delete section' : 'Delete item') }}</button>
                 </div>
+                @include('pages.vmix-description-editor')
 
                 @if ($ownsStructure)
                     <form wire:submit="addGroup" class="mt-4 flex items-start gap-2 border-t border-slate-100 pt-4">

@@ -17,12 +17,17 @@ use Illuminate\Support\Str;
  * A run-of-show item (template_id set) mirrors its template's structure and holds its own values.
  * A standalone section (neither) has its own structure, values and key in the master file.
  * A break (break_seconds set) is a run-of-show entry that counts down on the operator screen and is not in the master file.
+ * A placeholder (is_placeholder) is a named run-of-show slot with no fields; it is not in the master file.
  */
-#[Fillable(['template_id', 'is_template', 'name', 'key', 'on_air', 'on_air_at', 'sort_order', 'show_order', 'break_seconds'])]
+#[Fillable(['template_id', 'is_template', 'is_placeholder', 'name', 'description', 'key', 'on_air', 'on_air_at', 'sort_order', 'show_order', 'break_seconds'])]
 class VmixSection extends Model
 {
     /** @use HasFactory<VmixSectionFactory> */
     use HasFactory;
+
+    public const DescriptionLineMax = 200;
+
+    public const DescriptionLineLimit = 20;
 
     /**
      * @return array<string, string>
@@ -31,6 +36,7 @@ class VmixSection extends Model
     {
         return [
             'is_template' => 'boolean',
+            'is_placeholder' => 'boolean',
             'on_air' => 'boolean',
             'on_air_at' => 'datetime',
             'break_seconds' => 'integer',
@@ -74,12 +80,9 @@ class VmixSection extends Model
      */
     public function scopeStandalone(Builder $query): void
     {
-        $query->whereNull('template_id')->where('is_template', false)->whereNull('break_seconds')->orderBy('sort_order')->orderBy('id');
+        $query->whereNull('template_id')->where('is_template', false)->where('is_placeholder', false)->whereNull('break_seconds')->orderBy('sort_order')->orderBy('id');
     }
 
-    /**
-     * @param  Builder<VmixSection>  $query
-     */
     /**
      * Template items and standalone sections in the run of show, in show order.
      *
@@ -103,6 +106,29 @@ class VmixSection extends Model
     public function isBreak(): bool
     {
         return $this->break_seconds !== null;
+    }
+
+    public function isPlaceholder(): bool
+    {
+        return $this->is_placeholder;
+    }
+
+    /**
+     * Operator notes as a list of lines. An empty description is an empty list.
+     *
+     * @return list<string>
+     */
+    public function descriptionLines(): array
+    {
+        if (! filled($this->description)) {
+            return [];
+        }
+
+        return collect(preg_split('/\r\n|\r|\n/', $this->description) ?: [])
+            ->map(fn (string $line): string => trim($line))
+            ->filter()
+            ->values()
+            ->all();
     }
 
     /**
@@ -134,7 +160,7 @@ class VmixSection extends Model
             $next = $entries->get($entries->search(fn (VmixSection $entry) => $entry->id === $break->id) + 1);
 
             if ($next) {
-                if (! $next->on_air) {
+                if (! $next->isPlaceholder() && ! $next->on_air) {
                     $next->putOnAir();
                 }
 
@@ -171,6 +197,33 @@ class VmixSection extends Model
     }
 
     /**
+     * Add a named slot to the end of the run of show, with no fields.
+     */
+    public static function createPlaceholder(string $name): VmixSection
+    {
+        return static::query()->create([
+            'is_placeholder' => true,
+            'name' => $name,
+            'key' => static::uniqueKeyFor($name),
+            'show_order' => static::nextShowOrder(),
+        ]);
+    }
+
+    /**
+     * A name like "Placeholder 2" that isn't taken yet.
+     */
+    public static function nextPlaceholderName(): string
+    {
+        $number = 1;
+
+        while (static::query()->where('name', "Placeholder {$number}")->exists()) {
+            $number++;
+        }
+
+        return "Placeholder {$number}";
+    }
+
+    /**
      * What kind of run-of-show entry this is, e.g. the template name, "Break · 5:00" or "Section · stays live".
      */
     public function runOfShowLabel(): string
@@ -178,6 +231,7 @@ class VmixSection extends Model
         return match (true) {
             $this->isItem() => $this->template->name,
             $this->isBreak() => 'Break · '.static::formatSeconds($this->break_seconds),
+            $this->isPlaceholder() => 'Placeholder',
             default => 'Section · stays live',
         };
     }

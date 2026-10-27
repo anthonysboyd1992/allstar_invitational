@@ -27,6 +27,14 @@ class VmixSectionFactory extends Factory
         ];
     }
 
+    public function placeholder(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'is_placeholder' => true,
+            'show_order' => VmixSection::nextShowOrder(),
+        ]);
+    }
+
     public function template(): static
     {
         return $this->state(fn (array $attributes) => ['is_template' => true]);

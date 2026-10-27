@@ -909,6 +909,105 @@ class VmixDataTest extends TestCase
         $component->call('sortItems', $template->id, 0)->assertNotFound();
     }
 
+    public function test_placeholders_are_in_the_run_of_show_with_no_fields_and_stay_out_of_the_master_file(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $template = VmixSection::factory()->template()->create(['key' => 'interview']);
+        VmixField::factory()->for(VmixGroup::factory()->for($template, 'section'), 'group')->create(['key' => 'guest', 'value' => 'Max']);
+        $item = $this->onAirItemOf($template);
+
+        $component = Livewire::test('pages::vmix-data')
+            ->call('addPlaceholder')
+            ->assertHasNoErrors()
+            ->assertSee('Placeholder 1')
+            ->assertSee('no data fields');
+
+        $placeholder = VmixSection::query()->where('is_placeholder', true)->sole();
+        $this->assertTrue($placeholder->isInRunOfShow());
+        $this->assertFalse(VmixSection::query()->standalone()->whereKey($placeholder->id)->exists());
+        $this->getJson(route('feeds.data'))->assertExactJson(['interview' => [['guest' => 'Max']]]);
+
+        $component->set('newPlaceholderName', 'Feature winner')->call('addPlaceholder')->assertSee('Feature winner');
+        $component->call('addGroup')->assertForbidden();
+
+        Livewire::test('pages::vmix-data')->call('removeFromRunOfShow', $placeholder->id);
+        $this->assertModelMissing($placeholder);
+        $this->assertModelExists($item);
+    }
+
+    public function test_double_clicking_a_run_of_show_entry_puts_it_on_air(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $template = VmixSection::factory()->template()->create(['key' => 'interview']);
+        VmixField::factory()->for(VmixGroup::factory()->for($template, 'section'), 'group')->create(['key' => 'guest', 'value' => 'Max']);
+        $first = $this->onAirItemOf($template, 'Interview 1');
+        $second = $template->createItem('Interview 2');
+        $this->itemField($second, 'guest')->update(['value' => 'Tim', 'live_value' => 'Tim']);
+        $placeholder = VmixSection::createPlaceholder('Winner TBD');
+
+        $component = Livewire::test('pages::vmix-data')->call('goLive', $second->id);
+
+        $this->assertFalse($first->refresh()->on_air);
+        $this->assertTrue($second->refresh()->on_air);
+        $this->assertSame((string) $second->id, Setting::get(Setting::ShowCurrentItem));
+        $component->assertSet('selectedSectionId', $second->id);
+        $this->getJson(route('feeds.data'))->assertExactJson(['interview' => [['guest' => 'Tim']]]);
+
+        $component->call('goLive', $placeholder->id);
+        $this->assertFalse($second->refresh()->on_air);
+        $this->assertFalse($placeholder->refresh()->on_air);
+        $this->assertSame((string) $placeholder->id, Setting::get(Setting::ShowCurrentItem));
+        $this->assertSame('{}', $this->get(route('feeds.data'))->getContent());
+
+        $component->call('goLive', $template->id)->assertNotFound();
+    }
+
+    public function test_descriptions_save_as_a_bulleted_list_and_stay_out_of_the_master_file(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $template = VmixSection::factory()->template()->create([
+            'name' => 'Interview',
+            'key' => 'interview',
+            'description' => "Guest bumper\nAsk hometown",
+        ]);
+        VmixField::factory()->for(VmixGroup::factory()->for($template, 'section'), 'group')->create(['key' => 'guest', 'value' => 'Max']);
+        $this->onAirItemOf($template, 'Interview 1');
+        VmixSection::factory()->create([
+            'name' => 'Weather',
+            'key' => 'weather',
+            'description' => 'Track temp and wind',
+        ]);
+        VmixSection::createBreak(300)->update(['description' => "After heat 3\nHold for feature"]);
+        VmixSection::createPlaceholder('Feature winner')->update(['description' => 'Hold until the trophy is ready']);
+
+        $component = Livewire::test('pages::vmix-data', ['selectedSectionId' => $template->id])
+            ->assertSee('Guest bumper')
+            ->assertSee('Ask hometown')
+            ->assertSee('Track temp and wind')
+            ->assertSee('After heat 3')
+            ->assertSee('Hold for feature')
+            ->assertSee('Hold until the trophy is ready')
+            ->assertSet('sectionDescriptionLines', ['Guest bumper', 'Ask hometown', ''])
+            ->set('sectionDescriptionLines.0', '  One guest  ')
+            ->assertSet('sectionDescriptionLines.0', 'One guest')
+            ->set('sectionDescriptionLines.2', 'Hold for winner');
+
+        $this->assertSame("One guest\nAsk hometown\nHold for winner", $template->refresh()->description);
+        $this->assertSame(['One guest', 'Ask hometown', 'Hold for winner'], $template->descriptionLines());
+        $this->getJson(route('feeds.data'))->assertExactJson(['interview' => [['guest' => 'Max']]]);
+
+        $placeholder = VmixSection::query()->where('is_placeholder', true)->sole();
+        $component
+            ->call('selectSection', $placeholder->id)
+            ->assertSet('sectionDescriptionLines', ['Hold until the trophy is ready', ''])
+            ->set('sectionDescriptionLines.0', str_repeat('a', VmixSection::DescriptionLineMax + 1))
+            ->assertSet('sectionDescriptionLines.0', 'Hold until the trophy is ready')
+            ->call('removeDescriptionLine', 0)
+            ->assertSet('sectionDescriptionLines', ['']);
+
+        $this->assertNull($placeholder->refresh()->description);
+    }
+
     /**
      * Copy a template into a new run-of-show item and put it on air.
      */
