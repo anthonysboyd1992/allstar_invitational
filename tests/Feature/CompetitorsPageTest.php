@@ -210,7 +210,7 @@ class CompetitorsPageTest extends TestCase
             ->call('updateField', $competitor->id, 'weight', '201')
             ->call('updateField', $competitor->id, 'id', '99');
 
-        $this->assertSame(201, $competitor->refresh()->weight);
+        $this->assertSame('201.0', $competitor->refresh()->weight);
     }
 
     public function test_mass_delete(): void
@@ -228,13 +228,26 @@ class CompetitorsPageTest extends TestCase
     {
         $this->actingAs(User::factory()->create());
 
-        foreach ([['10', 'Adams'], [null, 'Baker'], ['71H', 'Cole'], ['9', 'Zane'], ['9', 'Avery'], ['71', 'Dunn']] as [$carNumber, $lastName]) {
+        foreach ([['22B', 'Adams'], [null, 'Baker'], ['11', 'Cole'], ['3', 'Zane'], ['3', 'Avery'], ['2B', 'Dunn'], ['1', 'Ellis']] as [$carNumber, $lastName]) {
             Competitor::factory()->create(['car_number' => $carNumber, 'last_name' => $lastName]);
         }
 
         $this->assertSame(
-            ['Avery', 'Zane', 'Adams', 'Dunn', 'Cole', 'Baker'],
+            ['Ellis', 'Dunn', 'Avery', 'Zane', 'Cole', 'Adams', 'Baker'],
             Livewire::test('pages::competitors')->get('competitors')->pluck('last_name')->all(),
         );
+    }
+
+    public function test_weight_keeps_one_decimal_place(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $competitor = Competitor::factory()->create(['weight' => 150]);
+
+        $component = Livewire::test('pages::competitors')
+            ->call('updateField', $competitor->id, 'weight', '150.8');
+        $this->assertSame('150.8', $competitor->refresh()->weight);
+
+        $component->call('updateField', $competitor->id, 'weight', '150.85');
+        $this->assertSame('150.8', $competitor->refresh()->weight);
     }
 }

@@ -128,7 +128,7 @@ class Competitor extends Model
     {
         return [
             'pill_number' => 'integer',
-            'weight' => 'integer',
+            'weight' => 'decimal:1',
         ];
     }
 }

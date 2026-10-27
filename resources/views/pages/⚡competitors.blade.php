@@ -62,7 +62,7 @@ new #[Title('Competitors')] class extends Component
             'first_name' => ['required', 'string', 'max:100'],
             'last_name' => ['required', 'string', 'max:100'],
             'hometown' => ['nullable', 'string', 'max:150'],
-            'weight' => ['nullable', 'integer', 'min:0', 'max:1000'],
+            'weight' => ['nullable', 'numeric', 'decimal:0,1', 'min:0', 'max:1000'],
             'transponder' => ['nullable', 'string', 'max:50'],
             'accolades' => ['nullable', 'string', 'max:2000'],
         ];
@@ -362,6 +362,7 @@ new #[Title('Competitors')] class extends Component
                             <span class="text-xs font-semibold text-slate-500">{{ $label }}</span>
                             <input
                                 type="{{ $field === 'weight' ? 'number' : 'text' }}"
+                                @if ($field === 'weight') step="0.1" min="0" @endif
                                 wire:model="form.{{ $field }}"
                                 @class([
                                     'mt-0.5 w-full rounded-md border px-2 py-2 text-sm focus:border-amber-500 focus:ring-1 focus:ring-amber-500 focus:outline-none',
@@ -610,6 +611,7 @@ new #[Title('Competitors')] class extends Component
                                 <td class="px-1 py-1">
                                     <input
                                         type="{{ $field === 'weight' ? 'number' : 'text' }}"
+                                        @if ($field === 'weight') step="0.1" min="0" @endif
                                         value="{{ $competitor->{$field} }}"
                                         wire:change="updateField({{ $competitor->id }}, '{{ $field }}', $event.target.value)"
                                         @class([
