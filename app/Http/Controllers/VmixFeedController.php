@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\VmixField;
+use App\Models\VmixSection;
 use App\Services\ImageCropper;
 use App\Services\VmixFeed;
 use Illuminate\Http\JsonResponse;
@@ -23,6 +24,8 @@ class VmixFeedController extends Controller
 
     public function data(VmixFeed $feed): JsonResponse
     {
+        VmixSection::finishExpiredBreaks();
+
         return $this->respond((object) $feed->data());
     }
 

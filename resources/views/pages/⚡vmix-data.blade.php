@@ -35,6 +35,10 @@ new #[Title('vMix Data')] class extends Component
 
     public string $newItemName = '';
 
+    public string $newBreakSeconds = '300';
+
+    public string $breakSeconds = '';
+
     public string $newGroupName = '';
 
     /** @var array<int, array{key?: string, value?: string}> */
@@ -67,6 +71,8 @@ new #[Title('vMix Data')] class extends Component
 
     public function mount(): void
     {
+        VmixSection::finishExpiredBreaks();
+
         if (! $this->selectedSectionId || ! VmixSection::query()->whereKey($this->selectedSectionId)->exists()) {
             $this->selectedSectionId = $this->firstSectionId();
         }
@@ -79,11 +85,12 @@ new #[Title('vMix Data')] class extends Component
      */
     public function loadSection(): void
     {
-        unset($this->section, $this->templates, $this->runOfShow, $this->standaloneSections);
+        unset($this->section, $this->templates, $this->runOfShow, $this->standaloneSections, $this->liveBreak, $this->currentItemId, $this->currentEntry, $this->upNext);
         $section = $this->section;
 
         $this->sectionName = (string) $section?->name;
         $this->sectionKey = (string) $section?->key;
+        $this->breakSeconds = (string) $section?->break_seconds;
         $this->groupNames = $section?->groups->mapWithKeys(fn (VmixGroup $group) => [$group->id => $group->name])->all() ?? [];
 
         $fields = $section?->groups->flatMap->fields ?? collect();
@@ -121,10 +128,37 @@ new #[Title('vMix Data')] class extends Component
         return VmixSection::query()->runOfShow()->with('template')->get();
     }
 
+    /**
+     * The break counting down on the operator screen: the most recently started on-air break.
+     */
+    #[Computed]
+    public function liveBreak(): ?VmixSection
+    {
+        return VmixSection::query()->whereNotNull('break_seconds')->where('on_air', true)->latest('on_air_at')->first();
+    }
+
     #[Computed]
     public function currentItemId(): ?int
     {
         return ($id = Setting::get(Setting::ShowCurrentItem)) ? (int) $id : null;
+    }
+
+    #[Computed]
+    public function currentEntry(): ?VmixSection
+    {
+        return $this->runOfShow->firstWhere('id', $this->currentItemId);
+    }
+
+    /**
+     * The run-of-show entry Next will put on air: the one after the current entry, or the first if nothing is current.
+     */
+    #[Computed]
+    public function upNext(): ?VmixSection
+    {
+        $entries = $this->runOfShow->values();
+        $currentIndex = $entries->search(fn (VmixSection $entry) => $entry->id === $this->currentItemId);
+
+        return $entries->get($currentIndex === false ? 0 : $currentIndex + 1);
     }
 
     #[Computed]
@@ -147,6 +181,23 @@ new #[Title('vMix Data')] class extends Component
         $this->newField = [];
         $this->resetValidation();
         $this->loadSection();
+    }
+
+    /**
+     * Open this run-of-show entry's fields, or close it if it is already open.
+     */
+    public function toggleSection(int $sectionId): void
+    {
+        if ($this->selectedSectionId === $sectionId) {
+            $this->selectedSectionId = null;
+            $this->newField = [];
+            $this->resetValidation();
+            $this->loadSection();
+
+            return;
+        }
+
+        $this->selectSection($sectionId);
     }
 
     public function addTemplate(): void
@@ -235,6 +286,49 @@ new #[Title('vMix Data')] class extends Component
         $this->selectSection($item->id);
     }
 
+    /**
+     * Called by the countdown when it reaches zero: end the break and put the next run-of-show entry on air.
+     */
+    public function finishBreak(): void
+    {
+        $previousItemId = $this->currentItemId;
+
+        VmixSection::finishExpiredBreaks();
+        unset($this->currentItemId);
+
+        if ($this->currentItemId && $this->currentItemId !== $previousItemId) {
+            $this->selectSection($this->currentItemId);
+        } else {
+            $this->loadSection();
+        }
+    }
+
+    public function addBreak(): void
+    {
+        $this->validate(
+            ['newBreakSeconds' => ['required', 'integer', 'min:1', 'max:86400']],
+            attributes: ['newBreakSeconds' => 'break length'],
+        );
+
+        $break = VmixSection::createBreak((int) $this->newBreakSeconds);
+
+        $this->selectSection($break->id);
+    }
+
+    public function updatedBreakSeconds(string $seconds): void
+    {
+        $validator = Validator::make(['seconds' => $seconds], ['seconds' => ['required', 'integer', 'min:1', 'max:86400']]);
+
+        if ($validator->fails() || ! $this->section?->isBreak()) {
+            $this->dispatch('notify', message: 'The break length must be a number of seconds from 1 to 86400.', type: 'error');
+        } else {
+            $this->section->update(['break_seconds' => (int) $seconds]);
+        }
+
+        unset($this->liveBreak);
+        $this->loadSection();
+    }
+
     public function updatedSectionName(string $name): void
     {
         $name = trim($name);
@@ -285,7 +379,7 @@ new #[Title('vMix Data')] class extends Component
             }
         }
 
-        unset($this->runOfShow, $this->standaloneSections, $this->currentItemId, $this->section);
+        unset($this->runOfShow, $this->standaloneSections, $this->currentItemId, $this->section, $this->liveBreak, $this->currentEntry, $this->upNext);
     }
 
     public function showNext(): void
@@ -299,16 +393,28 @@ new #[Title('vMix Data')] class extends Component
     }
 
     /**
-     * Take a standalone section out of the run of show. It stays in the sections list and keeps its on-air state.
+     * Take a standalone section out of the run of show (it stays in the sections list and keeps its on-air state), or delete a break.
      */
     public function removeFromRunOfShow(int $sectionId): void
     {
-        VmixSection::query()->standalone()->findOrFail($sectionId)->update(['show_order' => null]);
-        unset($this->runOfShow, $this->standaloneSections);
+        $section = VmixSection::query()->whereNull('template_id')->where('is_template', false)->findOrFail($sectionId);
+
+        if ($section->isBreak()) {
+            $section->delete();
+
+            if ($this->selectedSectionId === $section->id) {
+                $this->selectedSectionId = $this->firstSectionId();
+            }
+        } else {
+            $section->update(['show_order' => null]);
+        }
+
+        unset($this->liveBreak);
+        $this->loadSection();
     }
 
     /**
-     * Put the next (or previous) run-of-show entry on air. The current entry goes off air if it is a template item;
+     * Put the next (or previous) run-of-show entry on air. The current entry goes off air if it is a template item or a break;
      * standalone sections stay live until they are turned off.
      */
     protected function step(int $direction): void
@@ -323,7 +429,7 @@ new #[Title('vMix Data')] class extends Component
             return;
         }
 
-        if ($currentIndex !== false && $items->get($currentIndex)->isItem()) {
+        if ($currentIndex !== false && ($items->get($currentIndex)->isItem() || $items->get($currentIndex)->isBreak())) {
             $items->get($currentIndex)->update(['on_air' => false]);
         }
 
@@ -681,7 +787,7 @@ new #[Title('vMix Data')] class extends Component
      */
     protected function requireOwnStructure(): void
     {
-        abort_if(! $this->section || $this->section->isItem(), 403, 'Change the structure on the template.');
+        abort_if(! $this->section || $this->section->isItem() || $this->section->isBreak(), 403, 'Change the structure on the template.');
     }
 
     protected function firstSectionId(): ?int
@@ -705,8 +811,150 @@ new #[Title('vMix Data')] class extends Component
 };
 ?>
 
-<div class="flex items-start gap-4">
-    <aside class="w-72 shrink-0 space-y-4">
+<div class="space-y-4">
+    <div class="sticky top-14 z-20 space-y-2">
+        <div class="flex flex-wrap items-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-white shadow-sm ring-1 ring-slate-800">
+            <span class="text-[10px] font-black tracking-[0.18em] text-amber-400 uppercase">vMix</span>
+            <a href="{{ route('feeds.data') }}" target="_blank" class="min-w-0 flex-1 truncate font-mono text-xs text-slate-300 hover:text-white">{{ route('feeds.data') }}</a>
+            <button
+                type="button"
+                x-on:click="copyText(@js(route('feeds.data')), 'vMix URL')"
+                class="rounded-md bg-amber-400 px-2.5 py-1 text-[11px] font-black text-slate-900"
+            >Copy</button>
+        </div>
+    @php($liveBreak = $this->liveBreak)
+    <div
+        wire:key="clock-{{ $liveBreak?->id }}-{{ $liveBreak?->breakEndsAt()?->getTimestampMs() }}"
+        x-data="{
+            offset: {{ now()->getTimestampMs() }} - Date.now(),
+            now: Date.now(),
+            endsAt: @js($liveBreak?->breakEndsAt()?->getTimestampMs()),
+            get time() { return new Date(this.now + this.offset).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) },
+            get remaining() { return Math.round((this.endsAt - this.now - this.offset) / 1000) },
+            get countdown() { const s = Math.abs(this.remaining); return (this.remaining < 0 ? '+' : '') + Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') },
+            finished: false,
+            init() {
+                this.timer = setInterval(() => {
+                    this.now = Date.now();
+                    if (this.endsAt && ! this.finished && this.remaining <= 0) {
+                        this.finished = true;
+                        $wire.finishBreak();
+                    }
+                }, 250);
+            },
+            destroy() { clearInterval(this.timer) },
+        }"
+            class="grid grid-cols-1 gap-3 rounded-xl bg-slate-950 p-3 text-white shadow-sm ring-1 ring-slate-800 sm:grid-cols-2 xl:grid-cols-[auto_minmax(10rem,16rem)_minmax(16rem,1fr)_minmax(16rem,20rem)]"
+    >
+        <div class="flex flex-col justify-center rounded-lg bg-slate-900 px-4 py-3 ring-1 ring-slate-800">
+            <span class="text-[10px] font-black tracking-[0.18em] text-slate-500 uppercase">Time</span>
+            <span x-text="time" class="font-mono text-3xl leading-none font-black tabular-nums"></span>
+        </div>
+
+        @php($currentEntry = $this->currentEntry)
+        @php($upNext = $this->upNext)
+        <div class="flex min-w-0 flex-col justify-center rounded-lg bg-slate-900 px-4 py-3 ring-1 ring-slate-800">
+            <div class="flex items-center gap-2">
+                <span class="text-[10px] font-black tracking-[0.18em] text-slate-500 uppercase">Now</span>
+                @if ($currentEntry?->on_air)
+                    <span class="rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-black tracking-wide">ON AIR</span>
+                @endif
+            </div>
+            @if ($currentEntry)
+                <button type="button" wire:click="selectSection({{ $currentEntry->id }})" class="mt-1 max-w-full truncate text-left text-lg leading-tight font-black hover:text-amber-300">{{ $currentEntry->name }}</button>
+                <span class="mt-0.5 truncate text-[11px] font-semibold tracking-wide text-slate-400 uppercase">{{ $currentEntry->runOfShowLabel() }}</span>
+            @else
+                <span class="mt-1 text-lg font-black text-slate-600">Nothing current</span>
+            @endif
+        </div>
+
+        <div class="flex min-w-0 items-stretch gap-2 sm:col-span-2 xl:col-span-1">
+            <div class="flex min-w-0 flex-1 flex-col justify-center rounded-lg bg-amber-400 px-4 py-3 text-slate-950 shadow-[0_0_0_1px_rgb(251_191_36)]">
+                <span class="text-[10px] font-black tracking-[0.22em] uppercase">Up next</span>
+                @if ($upNext)
+                    <button type="button" wire:click="selectSection({{ $upNext->id }})" class="mt-1 max-w-full truncate text-left text-2xl leading-tight font-black">{{ $upNext->name }}</button>
+                    <span class="mt-0.5 truncate text-xs font-bold tracking-wide text-slate-800 uppercase">{{ $upNext->runOfShowLabel() }}</span>
+                @else
+                    <span class="mt-1 text-2xl leading-tight font-black text-slate-700">End of show</span>
+                @endif
+            </div>
+            <button
+                type="button"
+                wire:click="showNext"
+                @disabled(! $upNext)
+                title="Put the next entry on air"
+                class="flex shrink-0 flex-col items-center justify-center rounded-lg bg-red-600 px-5 text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
+            >
+                <span class="text-[10px] font-black tracking-[0.18em] uppercase opacity-80">Go</span>
+                <span class="text-xl leading-none font-black">Next &#9654;</span>
+            </button>
+        </div>
+
+        @if ($liveBreak)
+            <div
+                class="flex min-w-0 items-center justify-between gap-4 rounded-lg px-4 py-3 transition-colors duration-300 sm:col-span-2 xl:col-span-1"
+                x-bind:class="{
+                    'bg-slate-900 text-white ring-1 ring-slate-800': remaining > 60,
+                    'bg-lime-400 text-slate-950': remaining <= 60 && remaining > 45,
+                    'bg-yellow-300 text-slate-950': remaining <= 45 && remaining > 30,
+                    'bg-yellow-400 text-slate-950': remaining <= 30 && remaining > 15,
+                    'bg-orange-400 text-slate-950': remaining <= 15 && remaining > 10,
+                    'bg-orange-600 text-white': remaining <= 10 && remaining > 5,
+                    'bg-red-600 text-white animate-pulse': remaining <= 5,
+                }"
+            >
+                <div class="min-w-0">
+                    <span class="block truncate text-[10px] font-black tracking-[0.18em] uppercase opacity-80">{{ $liveBreak->name }} · {{ VmixSection::formatSeconds($liveBreak->break_seconds) }}</span>
+                    <span x-text="remaining < 0 ? 'Over' : 'Remaining'" class="block text-xs font-bold"></span>
+                </div>
+                <span x-text="countdown" class="shrink-0 font-mono text-5xl leading-none font-black tabular-nums"></span>
+            </div>
+        @else
+            <div class="flex min-w-0 flex-col justify-center rounded-lg bg-slate-900 px-4 py-3 ring-1 ring-slate-800 sm:col-span-2 xl:col-span-1">
+                <span class="text-[10px] font-black tracking-[0.18em] text-slate-500 uppercase">Break</span>
+                <span class="mt-1 text-lg font-black text-slate-600">Idle</span>
+            </div>
+        @endif
+    </div>
+    </div>
+    <div class="flex items-start gap-4">
+        <aside class="w-72 shrink-0 space-y-4">
+        <div class="rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
+            <div class="border-b border-slate-200 p-3">
+                <h2 class="text-sm font-bold tracking-wide text-slate-500 uppercase">Add to run of show</h2>
+            </div>
+            <form wire:submit="addItem" class="space-y-2 p-3">
+                <select wire:model="newItemTemplateId" class="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
+                    <option value="">Template or section…</option>
+                    @if ($this->templates->isNotEmpty())
+                        <optgroup label="New item from template">
+                            @foreach ($this->templates as $template)
+                                <option value="{{ $template->id }}">{{ $template->name }}</option>
+                            @endforeach
+                        </optgroup>
+                    @endif
+                    @if (($sectionsOutOfShow = $this->standaloneSections->reject->isInRunOfShow())->isNotEmpty())
+                        <optgroup label="Section (stays live until turned off)">
+                            @foreach ($sectionsOutOfShow as $standalone)
+                                <option value="section:{{ $standalone->id }}">{{ $standalone->name }}</option>
+                            @endforeach
+                        </optgroup>
+                    @endif
+                </select>
+                <input wire:model="newItemName" placeholder="Item name (optional), e.g. Interview 3" class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
+                @error('newItemName') <span class="block text-xs text-red-600">{{ $message }}</span> @enderror
+                <button type="submit" wire:loading.attr="disabled" wire:target="addItem" class="w-full rounded-md bg-slate-900 py-1.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50">Add item</button>
+            </form>
+            <form wire:submit="addBreak" class="border-t border-slate-200 p-3">
+                <div class="flex items-center gap-2">
+                    <input type="number" min="1" max="86400" wire:model="newBreakSeconds" aria-label="Break length in seconds" class="w-24 rounded-md border border-slate-300 px-2 py-1.5 text-right text-sm focus:border-amber-500 focus:outline-none">
+                    <span class="text-xs text-slate-500">sec</span>
+                    <button type="submit" wire:loading.attr="disabled" wire:target="addBreak" class="flex-1 rounded-md bg-slate-100 py-1.5 text-sm font-semibold hover:bg-slate-200 disabled:opacity-50">Add break</button>
+                </div>
+                @error('newBreakSeconds') <span class="block text-xs text-red-600">{{ $message }}</span> @enderror
+            </form>
+        </div>
+
         {{-- Standalone sections --}}
         <div class="rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
             <div class="border-b border-slate-200 p-3">
@@ -754,79 +1002,6 @@ new #[Title('vMix Data')] class extends Component
             </form>
         </div>
 
-        {{-- Run of show --}}
-        <div class="rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
-            <div class="flex items-center gap-1 border-b border-slate-200 p-3">
-                <h2 class="flex-1 text-sm font-bold tracking-wide text-slate-500 uppercase">Run of show</h2>
-                <button type="button" wire:click="showPrevious" title="Take the current item off air and put the previous one on" class="rounded-md bg-slate-100 px-2 py-1 text-xs font-black hover:bg-slate-200">&#9664; Prev</button>
-                <button type="button" wire:click="showNext" title="Take the current item off air and put the next one on" class="rounded-md bg-red-600 px-2 py-1 text-xs font-black text-white hover:bg-red-500">Next &#9654;</button>
-            </div>
-
-            <nav wire:sort="sortItems" wire:sort:config="{ group: { name: 'run-of-show', pull: false, put: true } }" class="min-h-12 space-y-1 p-2">
-                @forelse ($this->runOfShow as $item)
-                    <div
-                        wire:key="item-{{ $item->id }}"
-                        wire:sort:item="{{ $item->id }}"
-                        @class([
-                            'flex items-center gap-1 rounded-md pr-2',
-                            'bg-amber-400 text-slate-900' => $selectedSectionId === $item->id,
-                            'hover:bg-slate-100' => $selectedSectionId !== $item->id,
-                            'ring-2 ring-red-500' => $this->currentItemId === $item->id,
-                        ])
-                    >
-                        <span wire:sort:handle title="Drag to reorder" class="cursor-grab pl-1.5 text-sm text-slate-400 select-none hover:text-slate-700">&#10303;</span>
-                        <button type="button" wire:click="selectSection({{ $item->id }})" class="min-w-0 flex-1 py-1.5 pr-2 pl-1 text-left">
-                            <span class="block truncate text-sm font-bold">{{ $item->name }}</span>
-                            <span @class(['block truncate text-[10px] font-semibold uppercase', 'text-slate-700' => $selectedSectionId === $item->id, 'text-slate-400' => $selectedSectionId !== $item->id])>{{ $item->isItem() ? $item->template->name : 'Section · stays live' }}</span>
-                        </button>
-                        @unless ($item->isItem())
-                            <button
-                                type="button"
-                                wire:click="removeFromRunOfShow({{ $item->id }})"
-                                title="Remove from the run of show (keeps the section and its on-air state)"
-                                class="shrink-0 rounded px-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                            >&times;</button>
-                        @endunless
-                        <button
-                            type="button"
-                            wire:click="toggleOnAir({{ $item->id }})"
-                            title="{{ $item->on_air ? 'Take off air' : ($item->isItem() ? 'Put on air (takes other '.$item->template->name.' items off)' : 'Put on air') }}"
-                            @class([
-                                'shrink-0 rounded px-2 py-0.5 text-[10px] font-black tracking-wide',
-                                'bg-red-600 text-white' => $item->on_air,
-                                'bg-slate-200 text-slate-500 hover:bg-slate-300' => ! $item->on_air,
-                            ])
-                        >{{ $item->on_air ? 'ON AIR' : 'OFF' }}</button>
-                    </div>
-                @empty
-                    <p class="px-2 py-4 text-center text-sm text-slate-400">Nothing in the run of show yet. Add a template item below or drag a section here.</p>
-                @endforelse
-            </nav>
-
-            <form wire:submit="addItem" class="space-y-2 border-t border-slate-200 p-3">
-                <select wire:model="newItemTemplateId" class="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
-                    <option value="">Template or section…</option>
-                    @if ($this->templates->isNotEmpty())
-                        <optgroup label="New item from template">
-                            @foreach ($this->templates as $template)
-                                <option value="{{ $template->id }}">{{ $template->name }}</option>
-                            @endforeach
-                        </optgroup>
-                    @endif
-                    @if (($sectionsOutOfShow = $this->standaloneSections->reject->isInRunOfShow())->isNotEmpty())
-                        <optgroup label="Section (stays live until turned off)">
-                            @foreach ($sectionsOutOfShow as $standalone)
-                                <option value="section:{{ $standalone->id }}">{{ $standalone->name }}</option>
-                            @endforeach
-                        </optgroup>
-                    @endif
-                </select>
-                <input wire:model="newItemName" placeholder="Item name (optional), e.g. Interview 3" class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
-                @error('newItemName') <span class="block text-xs text-red-600">{{ $message }}</span> @enderror
-                <button type="submit" wire:loading.attr="disabled" wire:target="addItem" class="w-full rounded-md bg-slate-900 py-1.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50">Add to run of show</button>
-            </form>
-        </div>
-
         {{-- Templates --}}
         <div class="rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
             <div class="border-b border-slate-200 p-3">
@@ -863,332 +1038,81 @@ new #[Title('vMix Data')] class extends Component
         </div>
     </aside>
 
-    {{-- Selected section --}}
-    <section class="min-w-0 flex-1 space-y-4">
-        <div class="flex flex-wrap items-center gap-3 rounded-xl bg-slate-900 p-3 text-white shadow-sm">
-            <span class="text-xs font-bold tracking-wide text-amber-400 uppercase">Master vMix file</span>
-            <code class="min-w-0 flex-1 truncate rounded bg-slate-800 px-2 py-1.5 text-xs select-all">{{ route('feeds.data') }}</code>
-            <button
-                type="button"
-                x-on:click="copyText(@js(route('feeds.data')), 'master file URL')"
-                class="rounded-md bg-amber-400 px-3 py-1.5 text-xs font-bold text-slate-900"
-            >Copy URL</button>
-            <p class="w-full text-xs text-slate-400">Every standalone section that is <span class="font-bold text-red-400">ON AIR</span> goes out under its own key. Each template's key holds whichever of its items is on air.</p>
-        </div>
+    <div class="min-w-0 flex-1 space-y-4">
+        {{-- Run of show --}}
+        <div class="rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
+            <div class="flex items-center gap-2 border-b border-slate-200 px-4 py-3">
+                <h2 class="flex-1 text-sm font-bold tracking-wide text-slate-500 uppercase">Run of show</h2>
+                <button type="button" wire:click="showPrevious" title="Take the current item off air and put the previous one on" class="rounded-md bg-slate-100 px-3 py-1.5 text-xs font-black hover:bg-slate-200">&#9664; Prev</button>
+                <button type="button" wire:click="showNext" title="Take the current item off air and put the next one on" class="rounded-md bg-red-600 px-3 py-1.5 text-xs font-black text-white hover:bg-red-500">Next &#9654;</button>
+            </div>
 
-        @if ($section = $this->section)
-            @php($isTemplate = $section->isTemplate())
-            @php($ownsStructure = ! $section->isItem())
-            <div class="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
-                <div class="flex flex-wrap items-end gap-3">
-                    <label class="block">
-                        <span class="text-xs font-semibold text-slate-500">{{ $isTemplate ? 'Template name' : ($ownsStructure ? 'Section name' : 'Item name') }}</span>
-                        <input
-                            wire:model.blur="sectionName"
-                            x-on:keydown.enter.prevent="$el.blur()"
-                            class="mt-0.5 block w-56 rounded-md border border-slate-300 px-2 py-1.5 text-lg font-black focus:border-amber-500 focus:outline-none"
-                        >
-                    </label>
-                    @if ($ownsStructure)
-                        <label class="block">
-                            <span class="text-xs font-semibold text-slate-500">JSON key</span>
-                            <input
-                                wire:model.blur="sectionKey"
-                                x-on:keydown.enter.prevent="$el.blur()"
-                                class="mt-0.5 block w-48 rounded-md border border-slate-300 px-2 py-2 font-mono text-sm focus:border-amber-500 focus:outline-none"
-                            >
-                        </label>
-                    @else
-                        <div class="pb-1 text-sm text-slate-500">
-                            From template
-                            <button type="button" wire:click="selectSection({{ $section->template_id }})" class="font-bold text-slate-900 underline decoration-amber-400 decoration-2">{{ $section->template->name }}</button>
-                            &middot; feeds <code class="rounded bg-slate-100 px-1 font-mono text-xs">{{ $section->template->key }}</code>
-                        </div>
-                    @endif
-
-                    <div class="flex-1"></div>
-
-                    @if ($isTemplate)
-                        <span class="rounded-md bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600">TEMPLATE &middot; {{ $section->items_count }} {{ Str::plural('item', $section->items_count) }}</span>
-                    @else
+            <nav wire:sort="sortItems" wire:sort:config="{ group: { name: 'run-of-show', pull: false, put: true } }" class="min-h-40 space-y-1 p-3">
+                @forelse ($this->runOfShow as $index => $item)
+                    <div
+                        wire:key="item-{{ $item->id }}"
+                        wire:sort:item="{{ $item->id }}"
+                        @class([
+                            'overflow-hidden rounded-lg',
+                            'bg-amber-50 ring-2 ring-amber-400' => $selectedSectionId === $item->id,
+                            'hover:bg-slate-50 ring-1 ring-transparent' => $selectedSectionId !== $item->id,
+                            'ring-2 ring-red-500' => $this->currentItemId === $item->id && $selectedSectionId !== $item->id,
+                        ])
+                    >
+                        <div @class(['flex items-center gap-2 px-2 py-1', 'bg-amber-400 text-slate-900' => $selectedSectionId === $item->id])>
+                        <span wire:sort:handle title="Drag to reorder" class="cursor-grab px-1 text-base text-slate-400 select-none hover:text-slate-700">&#10303;</span>
+                        <span @class(['w-8 shrink-0 text-center font-mono text-sm font-black tabular-nums', 'text-slate-900' => $selectedSectionId === $item->id, 'text-slate-400' => $selectedSectionId !== $item->id])>{{ sprintf('%02d', $index + 1) }}</span>
+                        <button type="button" wire:click="toggleSection({{ $item->id }})" class="min-w-0 flex-1 py-2 pr-2 text-left">
+                            <span class="flex items-center gap-2">
+                                <span @class(['inline-block text-[10px] leading-none transition-transform', 'rotate-90' => $selectedSectionId === $item->id])>&#9654;</span>
+                                <span class="min-w-0">
+                                    <span class="block truncate text-base font-black">{{ $item->name }}</span>
+                                    <span @class(['block truncate text-xs font-semibold uppercase', 'text-slate-700' => $selectedSectionId === $item->id, 'text-slate-400' => $selectedSectionId !== $item->id])>{{ $item->runOfShowLabel() }}</span>
+                                </span>
+                            </span>
+                        </button>
+                        @unless ($item->isItem())
+                            <button
+                                type="button"
+                                wire:click="removeFromRunOfShow({{ $item->id }})"
+                                @if ($item->isBreak()) wire:confirm="Delete {{ $item->name }}?" @endif
+                                title="{{ $item->isBreak() ? 'Delete this break' : 'Remove from the run of show (keeps the section and its on-air state)' }}"
+                                class="shrink-0 rounded px-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                            >&times;</button>
+                        @endunless
                         <button
                             type="button"
-                            wire:click="toggleOnAir({{ $section->id }})"
+                            wire:click="toggleOnAir({{ $item->id }})"
+                            title="{{ $item->on_air ? 'Take off air' : ($item->isItem() ? 'Put on air (takes other '.$item->template->name.' items off)' : 'Put on air') }}"
                             @class([
-                                'rounded-md px-4 py-2 text-sm font-black',
-                                'bg-red-600 text-white hover:bg-red-500' => $section->on_air,
-                                'bg-slate-200 text-slate-600 hover:bg-slate-300' => ! $section->on_air,
+                                'shrink-0 rounded px-2 py-0.5 text-[10px] font-black tracking-wide',
+                                'bg-red-600 text-white' => $item->on_air,
+                                'bg-slate-200 text-slate-500 hover:bg-slate-300' => ! $item->on_air,
                             ])
-                        >{{ $section->on_air ? 'ON AIR — take off' : 'OFF AIR — put on air' }}</button>
-                        @if ($pendingInSection = $section->groups->flatMap->fields->filter->isPending()->count())
-                            <button type="button" wire:click="pushSection" class="rounded-md bg-red-600 px-4 py-2 text-sm font-black text-white hover:bg-red-500">Update all pending ({{ $pendingInSection }})</button>
+                        >{{ $item->on_air ? ($item->isBreak() ? 'ON' : 'ON AIR') : 'OFF' }}</button>
+                        </div>
+                        @if ($selectedSectionId === $item->id && ($section = $this->section))
+                            <div wire:sort:ignore class="border-t border-amber-300/60 bg-white p-3">
+                                @include('pages.vmix-section-editor', ['section' => $section])
+                            </div>
                         @endif
-                    @endif
-                    <button
-                        type="button"
-                        wire:click="deleteSection"
-                        wire:confirm="{{ match (true) {
-                            $isTemplate => 'Delete the '.$section->name.' template and all '.$section->items_count.' of its run-of-show items?',
-                            $ownsStructure => 'Delete '.$section->name.' with all its groups and fields?',
-                            default => 'Delete '.$section->name.' from the run of show?',
-                        } }}"
-                        class="rounded-md px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50"
-                    >{{ $isTemplate ? 'Delete template' : ($ownsStructure ? 'Delete section' : 'Delete item') }}</button>
-                </div>
-
-                @if ($ownsStructure)
-                    <form wire:submit="addGroup" class="mt-4 flex items-start gap-2 border-t border-slate-100 pt-4">
-                        <div>
-                            <input wire:model="newGroupName" placeholder="New group, e.g. Heading" class="w-56 rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
-                            @error('newGroupName') <span class="block text-xs text-red-600">{{ $message }}</span> @enderror
-                        </div>
-                        <button type="submit" wire:loading.attr="disabled" wire:target="addGroup" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50">Add group</button>
-                        <p class="self-center text-xs text-slate-400">
-                            @if ($isTemplate)
-                                Groups, fields, sizes and AUTO/MANUAL set here apply to every item made from this template. Values here are the defaults for new items.
-                            @else
-                                Groups organize fields on this screen. All fields in the section go out together, so each field name is used once per section.
-                            @endif
-                        </p>
-                    </form>
-                @else
-                    <p class="mt-3 border-t border-slate-100 pt-3 text-xs text-slate-400">Fill in this item's values. To add or change fields, edit the <span class="font-semibold">{{ $section->template->name }}</span> template.</p>
-                @endif
-            </div>
-
-            <div @if ($ownsStructure) wire:sort="sortGroups" @endif class="grid grid-cols-1 gap-3 xl:grid-cols-2">
-                @forelse ($section->groups as $group)
-                    <div wire:key="group-{{ $group->id }}" wire:sort:item="{{ $group->id }}" class="rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
-                        <div class="flex items-center gap-2 border-b border-slate-100 p-2">
-                            @if ($ownsStructure)
-                                <span wire:sort:handle title="Drag to reorder" class="cursor-grab px-1 text-base text-slate-400 select-none hover:text-slate-700">&#10303;</span>
-                                <input
-                                    wire:model.blur="groupNames.{{ $group->id }}"
-                                    x-on:keydown.enter.prevent="$el.blur()"
-                                    class="min-w-0 flex-1 rounded border border-transparent px-1 py-0.5 font-bold hover:border-slate-200 focus:border-amber-500 focus:outline-none"
-                                >
-                            @else
-                                <span class="min-w-0 flex-1 px-1 py-0.5 font-bold">{{ $group->name }}</span>
-                            @endif
-                            @if (! $isTemplate && ($pendingInGroup = $group->fields->filter->isPending()->count()))
-                                <button type="button" wire:click="pushGroup({{ $group->id }})" class="rounded bg-red-600 px-2 py-0.5 text-xs font-black text-white hover:bg-red-500">Update all ({{ $pendingInGroup }})</button>
-                            @endif
-                            @if ($ownsStructure)
-                                <button
-                                    type="button"
-                                    wire:click="deleteGroup({{ $group->id }})"
-                                    wire:confirm="{{ $isTemplate ? 'Delete group '.$group->name.' from the template and every item?' : 'Delete group '.$group->name.'?' }}"
-                                    class="rounded px-2 py-0.5 text-xs font-bold text-red-600 hover:bg-red-50"
-                                >Delete</button>
-                            @endif
-                        </div>
-
-                        <div class="space-y-1 p-2">
-                            @foreach ($group->fields as $field)
-                                <div
-                                    wire:key="field-{{ $field->id }}"
-                                    @class(['rounded', 'bg-amber-50 p-1 ring-1 ring-amber-300' => ! $isTemplate && $field->isPending()])
-                                >
-                                <div class="flex items-center gap-1">
-                                    @if ($ownsStructure)
-                                        <input
-                                            wire:model.blur="fieldKeys.{{ $field->id }}"
-                                            x-on:keydown.enter.prevent="$el.blur()"
-                                            class="w-36 shrink-0 rounded border border-slate-200 bg-slate-50 px-1.5 py-1 font-mono text-xs focus:border-amber-500 focus:outline-none"
-                                        >
-                                    @else
-                                        <span class="w-36 shrink-0 truncate px-1.5 py-1 font-mono text-xs text-slate-500" title="{{ $field->key }}">{{ $field->key }}</span>
-                                    @endif
-                                    @if ($field->isImage())
-                                        <div class="flex min-w-0 flex-1 items-center gap-2 rounded border border-slate-200 px-1.5 py-1">
-                                            @if ($url = $field->imageUrl())
-                                                <a href="{{ $url }}" target="_blank" class="shrink-0">
-                                                    <img src="{{ $url }}" alt="{{ $field->key }}" class="h-8 w-14 rounded bg-[repeating-conic-gradient(#e2e8f0_0_25%,#fff_0_50%)] bg-[length:10px_10px] object-contain">
-                                                </a>
-                                                <span class="min-w-0 flex-1"></span>
-                                            @else
-                                                <span class="min-w-0 flex-1 text-xs text-slate-400">No image</span>
-                                            @endif
-                                            @if ($ownsStructure)
-                                                <div class="flex shrink-0 items-center gap-0.5 text-xs text-slate-400" title="Images are resized and cropped from the center to this size. Changing it re-crops the uploaded image{{ $isTemplate ? ' here and in every item' : '' }}.">
-                                                    <input type="number" min="1" max="{{ VmixField::MaxDimension }}" wire:model.blur="fieldWidths.{{ $field->id }}" x-on:keydown.enter.prevent="$el.blur()" aria-label="Width" class="w-14 rounded border border-slate-200 px-1 py-0.5 text-right text-xs text-slate-700 focus:border-amber-500 focus:outline-none">
-                                                    &times;
-                                                    <input type="number" min="1" max="{{ VmixField::MaxDimension }}" wire:model.blur="fieldHeights.{{ $field->id }}" x-on:keydown.enter.prevent="$el.blur()" aria-label="Height" class="w-14 rounded border border-slate-200 px-1 py-0.5 text-right text-xs text-slate-700 focus:border-amber-500 focus:outline-none">
-                                                </div>
-                                            @else
-                                                <span class="shrink-0 font-mono text-xs text-slate-400" title="Size is set on the template">{{ $field->width }}&times;{{ $field->height }}</span>
-                                            @endif
-                                            <span wire:loading wire:target="uploads.{{ $field->id }}, fieldWidths.{{ $field->id }}, fieldHeights.{{ $field->id }}" class="text-xs font-semibold text-amber-600">Working…</span>
-                                            <label class="shrink-0 cursor-pointer rounded bg-slate-900 px-2 py-0.5 text-xs font-bold text-white hover:bg-slate-700">
-                                                {{ $field->imageUrl() ? 'Replace' : 'Upload' }}
-                                                <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" wire:model="uploads.{{ $field->id }}" class="hidden">
-                                            </label>
-                                            @if ($field->imageUrl())
-                                                <button type="button" wire:click="removeImage({{ $field->id }})" class="shrink-0 rounded px-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100">Clear</button>
-                                            @endif
-                                        </div>
-                                    @elseif ($field->isDriver())
-                                        @php($driver = $this->drivers->firstWhere('id', (int) $field->value))
-                                        <div class="flex min-w-0 flex-1 items-center gap-2 rounded border border-slate-200 px-1.5 py-1">
-                                            <label
-                                                title="{{ $driver ? 'Upload a new headshot for '.$driver->full_name.' (updates the competitor)' : 'Pick a driver first' }}"
-                                                @class([
-                                                    'relative flex size-8 shrink-0 items-center justify-center overflow-hidden rounded bg-slate-100 text-slate-400 ring-1 ring-slate-200',
-                                                    'cursor-pointer hover:ring-amber-500' => $driver,
-                                                ])
-                                            >
-                                                @if ($driver?->headshotUrl())
-                                                    <img src="{{ $driver->headshotUrl() }}" alt="{{ $driver->full_name }}" class="size-full object-cover">
-                                                @else
-                                                    <span class="text-sm">{{ $driver ? '+' : '–' }}</span>
-                                                @endif
-                                                <span wire:loading wire:target="headshotUploads.{{ $driver?->id }}" class="absolute inset-0 animate-pulse bg-amber-400/60"></span>
-                                                @if ($driver)
-                                                    <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" wire:model="headshotUploads.{{ $driver->id }}" class="hidden">
-                                                @endif
-                                            </label>
-                                            <select
-                                                wire:model.live="fieldValues.{{ $field->id }}"
-                                                class="min-w-0 flex-1 rounded border border-slate-200 bg-white px-1 py-0.5 text-sm focus:border-amber-500 focus:outline-none"
-                                            >
-                                                <option value="">— No driver —</option>
-                                                @foreach ($this->drivers as $option)
-                                                    <option value="{{ $option->id }}">{{ $option->car_number ? '#'.$option->car_number.' ' : '' }}{{ $option->full_name }}</option>
-                                                @endforeach
-                                            </select>
-                                            <span class="shrink-0 font-mono text-[10px] text-slate-400" title="{{ collect(VmixField::DriverKeySuffixes)->map(fn ($suffix) => $field->key.'_'.$suffix)->implode(', ') }}">{{ $field->key }}_*</span>
-                                        </div>
-                                    @elseif ($field->isColor())
-                                        <div class="flex min-w-0 flex-1 items-center gap-2 rounded border border-slate-200 px-1.5 py-1">
-                                            <input
-                                                type="color"
-                                                wire:model.live.debounce.150ms="fieldValues.{{ $field->id }}"
-                                                aria-label="Pick a color for {{ $field->key }}"
-                                                class="h-7 w-10 shrink-0 cursor-pointer rounded border border-slate-200 bg-white p-0.5"
-                                            >
-                                            <input
-                                                wire:model.blur="fieldValues.{{ $field->id }}"
-                                                x-on:keydown.enter.prevent="$el.blur()"
-                                                placeholder="#FFFFFF"
-                                                maxlength="7"
-                                                aria-label="Hex value for {{ $field->key }}"
-                                                class="w-24 rounded border border-slate-200 px-1.5 py-0.5 font-mono text-sm uppercase focus:border-amber-500 focus:outline-none"
-                                            >
-                                        </div>
-                                    @else
-                                        <input
-                                            wire:model.live.debounce.250ms="fieldValues.{{ $field->id }}"
-                                            placeholder="(blank)"
-                                            class="min-w-0 flex-1 rounded border border-slate-200 px-1.5 py-1 text-sm focus:border-amber-500 focus:outline-none"
-                                        >
-                                    @endif
-                                    @if ($ownsStructure)
-                                        <button
-                                            type="button"
-                                            wire:click="toggleNeedsUpdate({{ $field->id }})"
-                                            title="{{ $field->needs_update ? 'Changes wait for Update. Click to go live as you type.' : 'Changes go live as you type. Click to make them wait for Update.' }}"
-                                            @class([
-                                                'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-black tracking-wide',
-                                                'bg-slate-800 text-white' => $field->needs_update,
-                                                'bg-emerald-100 text-emerald-800' => ! $field->needs_update,
-                                            ])
-                                        >{{ $field->needs_update ? 'MANUAL' : 'AUTO' }}</button>
-                                        @if (! $isTemplate && $field->isPending())
-                                            <button type="button" wire:click="pushField({{ $field->id }})" class="shrink-0 rounded bg-red-600 px-2 py-0.5 text-xs font-black text-white hover:bg-red-500">Update</button>
-                                        @endif
-                                        <button
-                                            type="button"
-                                            wire:click="deleteField({{ $field->id }})"
-                                            wire:confirm="{{ $isTemplate ? 'Delete field '.$field->key.' from the template and every item?' : 'Delete field '.$field->key.'?' }}"
-                                            title="Remove {{ $field->key }} from this group"
-                                            class="rounded px-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                                        >&times;</button>
-                                    @else
-                                        <span
-                                            title="{{ $field->needs_update ? 'Changes wait for Update (set on the template)' : 'Changes go live as you type (set on the template)' }}"
-                                            @class([
-                                                'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-black tracking-wide',
-                                                'bg-slate-800 text-white' => $field->needs_update,
-                                                'bg-emerald-100 text-emerald-800' => ! $field->needs_update,
-                                            ])
-                                        >{{ $field->needs_update ? 'MANUAL' : 'AUTO' }}</span>
-                                        @if ($field->isPending())
-                                            <button type="button" wire:click="pushField({{ $field->id }})" class="shrink-0 rounded bg-red-600 px-2 py-0.5 text-xs font-black text-white hover:bg-red-500">Update</button>
-                                        @endif
-                                    @endif
-                                </div>
-                                @if (! $isTemplate && $field->isPending())
-                                    <div class="mt-1 flex items-center gap-2 pl-1 text-xs text-slate-500">
-                                        <span class="rounded bg-red-600 px-1 text-[10px] font-black text-white">ON AIR</span>
-                                        @if ($field->isImage())
-                                            @if ($liveUrl = $field->imageUrl($field->live_value))
-                                                <img src="{{ $liveUrl }}" alt="On air" class="h-6 w-10 rounded bg-slate-100 object-contain">
-                                            @else
-                                                <span class="italic">no image</span>
-                                            @endif
-                                        @elseif ($field->isDriver())
-                                            @php($liveDriver = $this->drivers->firstWhere('id', (int) $field->live_value))
-                                            <span class="font-semibold text-slate-700">{{ $liveDriver ? ($liveDriver->car_number ? '#'.$liveDriver->car_number.' ' : '').$liveDriver->full_name : 'No driver' }}</span>
-                                        @elseif ($field->isColor() && filled($field->live_value))
-                                            <span class="size-4 rounded ring-1 ring-slate-300" style="background-color: {{ $field->live_value }}"></span>
-                                            <span class="font-mono font-semibold text-slate-700">{{ $field->live_value }}</span>
-                                        @else
-                                            <span class="truncate font-semibold text-slate-700">{{ filled($field->live_value) ? $field->live_value : '(blank)' }}</span>
-                                        @endif
-                                        <span class="text-amber-700">→ pending change</span>
-                                    </div>
-                                @endif
-                                </div>
-                            @endforeach
-
-                            @if ($ownsStructure)
-                            <form wire:submit="addField({{ $group->id }})" class="flex items-start gap-1 pt-1">
-                                <div class="w-36 shrink-0">
-                                    <input wire:model="newField.{{ $group->id }}.key" placeholder="field_name" class="w-full rounded border border-dashed border-slate-300 px-1.5 py-1 font-mono text-xs focus:border-amber-500 focus:outline-none">
-                                </div>
-                                <select wire:model.live="newField.{{ $group->id }}.type" class="shrink-0 rounded border border-dashed border-slate-300 bg-white px-1 py-1 text-xs focus:border-amber-500 focus:outline-none">
-                                    @foreach (VmixField::Types as $type => $label)
-                                        <option value="{{ $type }}">{{ $label }}</option>
-                                    @endforeach
-                                </select>
-                                @if (($newField[$group->id]['type'] ?? VmixField::TypeText) === VmixField::TypeImage)
-                                    <div class="flex min-w-0 flex-1 items-center gap-0.5 text-xs text-slate-400" title="Uploads are resized and cropped from the center to this size">
-                                        <input type="number" min="1" max="{{ VmixField::MaxDimension }}" wire:model="newField.{{ $group->id }}.width" placeholder="{{ VmixField::DefaultWidth }}" aria-label="Width" class="w-16 rounded border border-dashed border-slate-300 px-1 py-1 text-right text-xs text-slate-700 focus:border-amber-500 focus:outline-none">
-                                        &times;
-                                        <input type="number" min="1" max="{{ VmixField::MaxDimension }}" wire:model="newField.{{ $group->id }}.height" placeholder="{{ VmixField::DefaultHeight }}" aria-label="Height" class="w-16 rounded border border-dashed border-slate-300 px-1 py-1 text-right text-xs text-slate-700 focus:border-amber-500 focus:outline-none">
-                                        <span class="ml-1">px</span>
-                                    </div>
-                                @elseif (($newField[$group->id]['type'] ?? VmixField::TypeText) === VmixField::TypeDriver)
-                                    <select wire:model="newField.{{ $group->id }}.value" class="min-w-0 flex-1 rounded border border-dashed border-slate-300 bg-white px-1 py-1 text-sm focus:border-amber-500 focus:outline-none">
-                                        <option value="">— No driver —</option>
-                                        @foreach ($this->drivers as $option)
-                                            <option value="{{ $option->id }}">{{ $option->car_number ? '#'.$option->car_number.' ' : '' }}{{ $option->full_name }}</option>
-                                        @endforeach
-                                    </select>
-                                @elseif (($newField[$group->id]['type'] ?? VmixField::TypeText) === VmixField::TypeColor)
-                                    <div class="flex min-w-0 flex-1 items-center gap-1">
-                                        <input type="color" wire:model.live="newField.{{ $group->id }}.value" value="{{ VmixField::DefaultColor }}" aria-label="Color" class="h-7 w-10 shrink-0 cursor-pointer rounded border border-dashed border-slate-300 bg-white p-0.5">
-                                        <input wire:model="newField.{{ $group->id }}.value" placeholder="{{ VmixField::DefaultColor }}" maxlength="7" aria-label="Hex value" class="w-24 rounded border border-dashed border-slate-300 px-1.5 py-1 font-mono text-sm uppercase focus:border-amber-500 focus:outline-none">
-                                    </div>
-                                @else
-                                    <input wire:model="newField.{{ $group->id }}.value" placeholder="Value" class="min-w-0 flex-1 rounded border border-dashed border-slate-300 px-1.5 py-1 text-sm focus:border-amber-500 focus:outline-none">
-                                @endif
-                                <button type="submit" wire:loading.attr="disabled" wire:target="addField" class="rounded bg-slate-100 px-2 py-1 text-xs font-bold hover:bg-slate-200 disabled:opacity-50">Add field</button>
-                            </form>
-                            @error("newField.{$group->id}.key") <span class="text-xs text-red-600">{{ $message }}</span> @enderror
-                            @endif
-                        </div>
                     </div>
                 @empty
-                    <div class="rounded-xl border-2 border-dashed border-slate-300 p-8 text-center text-slate-400 xl:col-span-2">
-                        @if ($ownsStructure)
-                            Add a group above, e.g. “Heading”, then give it fields like <code>driver</code> or <code>topic</code>.
-                        @else
-                            The {{ $section->template->name }} template has no groups yet.
-                        @endif
-                    </div>
+                    <p class="px-2 py-8 text-center text-sm text-slate-400">Nothing in the run of show yet. Add an item or break on the left, or drag a section here.</p>
                 @endforelse
+            </nav>
+
+        </div>
+
+    {{-- Selected section --}}
+    <section class="min-w-0 space-y-4">
+        @if (($section = $this->section) && ! $section->isInRunOfShow())
+            @include('pages.vmix-section-editor', ['section' => $section])
+        @elseif (! $section)
+            <div class="rounded-xl border-2 border-dashed border-slate-300 p-10 text-center text-slate-400">
+                Add a standalone section on the left, e.g. “Weather”, or a template like “Interview”, then add items to the run of show.
             </div>
+        @endif
 
             <div class="rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
                 <div class="flex items-center justify-between border-b border-slate-200 px-4 py-2">
@@ -1197,10 +1121,7 @@ new #[Title('vMix Data')] class extends Component
                 </div>
                 <pre class="max-h-96 overflow-auto rounded-b-xl bg-slate-950 p-4 text-xs text-emerald-300">{{ json_encode((object) app(VmixFeed::class)->data(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) }}</pre>
             </div>
-        @else
-            <div class="rounded-xl border-2 border-dashed border-slate-300 p-10 text-center text-slate-400">
-                Add a standalone section on the left, e.g. “Weather”, or a template like “Interview” with items such as “Interview 1” in the run of show.
-            </div>
-        @endif
     </section>
+    </div>
+    </div>
 </div>

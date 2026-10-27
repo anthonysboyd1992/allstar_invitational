@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Carbon\CarbonInterface;
 use Database\Factories\VmixSectionFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
@@ -15,8 +16,9 @@ use Illuminate\Support\Str;
  * A template (is_template) defines groups and fields; its values are the defaults for new items.
  * A run-of-show item (template_id set) mirrors its template's structure and holds its own values.
  * A standalone section (neither) has its own structure, values and key in the master file.
+ * A break (break_seconds set) is a run-of-show entry that counts down on the operator screen and is not in the master file.
  */
-#[Fillable(['template_id', 'is_template', 'name', 'key', 'on_air', 'sort_order', 'show_order'])]
+#[Fillable(['template_id', 'is_template', 'name', 'key', 'on_air', 'on_air_at', 'sort_order', 'show_order', 'break_seconds'])]
 class VmixSection extends Model
 {
     /** @use HasFactory<VmixSectionFactory> */
@@ -30,6 +32,8 @@ class VmixSection extends Model
         return [
             'is_template' => 'boolean',
             'on_air' => 'boolean',
+            'on_air_at' => 'datetime',
+            'break_seconds' => 'integer',
         ];
     }
 
@@ -70,7 +74,7 @@ class VmixSection extends Model
      */
     public function scopeStandalone(Builder $query): void
     {
-        $query->whereNull('template_id')->where('is_template', false)->orderBy('sort_order')->orderBy('id');
+        $query->whereNull('template_id')->where('is_template', false)->whereNull('break_seconds')->orderBy('sort_order')->orderBy('id');
     }
 
     /**
@@ -94,6 +98,88 @@ class VmixSection extends Model
     public function isItem(): bool
     {
         return $this->template_id !== null;
+    }
+
+    public function isBreak(): bool
+    {
+        return $this->break_seconds !== null;
+    }
+
+    /**
+     * When an on-air break's countdown reaches zero.
+     */
+    public function breakEndsAt(): ?CarbonInterface
+    {
+        return $this->isBreak() && $this->on_air && $this->on_air_at ? $this->on_air_at->copy()->addSeconds($this->break_seconds) : null;
+    }
+
+    /**
+     * Take every on-air break whose countdown has run out off air, and put the run-of-show entry after it on air
+     * (if it isn't already) as the current entry.
+     */
+    public static function finishExpiredBreaks(): void
+    {
+        $expired = static::query()
+            ->whereNotNull('break_seconds')
+            ->where('on_air', true)
+            ->get()
+            ->filter(fn (VmixSection $break) => $break->breakEndsAt()?->lessThanOrEqualTo(now()));
+
+        foreach ($expired as $break) {
+            if (! static::query()->whereKey($break->id)->where('on_air', true)->update(['on_air' => false]) || ! $break->isInRunOfShow()) {
+                continue;
+            }
+
+            $entries = static::query()->runOfShow()->get()->values();
+            $next = $entries->get($entries->search(fn (VmixSection $entry) => $entry->id === $break->id) + 1);
+
+            if ($next) {
+                if (! $next->on_air) {
+                    $next->putOnAir();
+                }
+
+                Setting::put(Setting::ShowCurrentItem, (string) $next->id);
+            }
+        }
+    }
+
+    /**
+     * A length in seconds as m:ss, e.g. 330 is "5:30".
+     */
+    public static function formatSeconds(int $seconds): string
+    {
+        return sprintf('%d:%02d', intdiv($seconds, 60), $seconds % 60);
+    }
+
+    /**
+     * Add a break to the end of the run of show, named like "Break 2".
+     */
+    public static function createBreak(int $seconds): VmixSection
+    {
+        $number = 1;
+
+        while (static::query()->where('name', "Break {$number}")->exists()) {
+            $number++;
+        }
+
+        return static::query()->create([
+            'name' => "Break {$number}",
+            'key' => static::uniqueKeyFor("Break {$number}"),
+            'break_seconds' => $seconds,
+            'show_order' => static::nextShowOrder(),
+        ]);
+    }
+
+    /**
+     * What kind of run-of-show entry this is, e.g. the template name, "Break · 5:00" or "Section · stays live".
+     */
+    public function runOfShowLabel(): string
+    {
+        return match (true) {
+            $this->isItem() => $this->template->name,
+            $this->isBreak() => 'Break · '.static::formatSeconds($this->break_seconds),
+            default => 'Section · stays live',
+        };
     }
 
     public function isInRunOfShow(): bool
@@ -166,7 +252,7 @@ class VmixSection extends Model
             static::query()->where('template_id', $this->template_id)->whereKeyNot($this->id)->update(['on_air' => false]);
         }
 
-        $this->update(['on_air' => true]);
+        $this->update(['on_air' => true, 'on_air_at' => now()]);
     }
 
     /**

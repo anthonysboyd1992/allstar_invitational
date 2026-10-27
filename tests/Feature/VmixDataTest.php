@@ -650,7 +650,11 @@ class VmixDataTest extends TestCase
 
         $component = fn () => Livewire::test('pages::vmix-data', ['selectedSectionId' => $item->id]);
 
-        $component()->assertSee('From template')->assertDontSee('Add group');
+        $open = $component();
+        $open->assertSee('From template')->assertDontSee('Add group');
+        $open->call('toggleSection', $item->id)->assertDontSee('From template');
+        $open->call('toggleSection', $item->id)->assertSee('From template');
+
         $component()->set('newGroupName', 'Extra')->call('addGroup')->assertForbidden();
         $component()->call('deleteField', $field->id)->assertForbidden();
         $component()->call('deleteGroup', $field->vmix_group_id)->assertForbidden();
@@ -688,9 +692,13 @@ class VmixDataTest extends TestCase
             return $item;
         });
 
-        $component = Livewire::test('pages::vmix-data')->call('showNext');
+        $component = Livewire::test('pages::vmix-data');
+        $this->assertSame($first->id, $component->instance()->upNext->id);
+
+        $component->call('showNext');
         $this->assertSame([$first->id], VmixSection::query()->where('on_air', true)->pluck('id')->all());
-        $component->assertSet('selectedSectionId', $first->id);
+        $component->assertSet('selectedSectionId', $first->id)->assertSeeInOrder(['Now', 'Interview 1', 'Up next', 'Interview 2']);
+        $this->assertSame($second->id, $component->instance()->upNext->id);
 
         $component->call('showNext')->call('showNext');
         $this->assertSame([$third->id], VmixSection::query()->where('on_air', true)->pluck('id')->all());
@@ -803,6 +811,86 @@ class VmixDataTest extends TestCase
         $this->assertModelExists($weather);
 
         $component->call('removeFromRunOfShow', $first->id)->assertNotFound();
+    }
+
+    public function test_breaks_count_down_in_the_run_of_show_and_stay_out_of_the_master_file(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $this->freezeSecond();
+        $template = VmixSection::factory()->template()->create(['key' => 'interview']);
+        VmixField::factory()->for(VmixGroup::factory()->for($template, 'section'), 'group')->create(['key' => 'guest']);
+        $first = $template->createItem('Interview 1');
+
+        $component = Livewire::test('pages::vmix-data')
+            ->set('newBreakSeconds', '0')
+            ->call('addBreak')
+            ->assertHasErrors('newBreakSeconds')
+            ->set('newBreakSeconds', '330')
+            ->call('addBreak')
+            ->assertHasNoErrors()
+            ->assertSee('Idle');
+
+        $break = VmixSection::query()->whereNotNull('break_seconds')->sole();
+        $this->assertSame(['Break 1', 330], [$break->name, $break->break_seconds]);
+        $this->assertSame('5:30', VmixSection::formatSeconds($break->break_seconds));
+        $this->assertFalse(VmixSection::query()->standalone()->whereKey($break->id)->exists());
+        $component->assertSet('selectedSectionId', $break->id)->set('breakSeconds', '90');
+        $this->assertSame(90, $break->refresh()->break_seconds);
+
+        $second = $template->createItem('Interview 2');
+        $this->assertSame([$first->id, $break->id, $second->id], VmixSection::query()->runOfShow()->pluck('id')->all());
+
+        $component->call('showNext')->call('showNext');
+        $break->refresh();
+        $this->assertTrue($break->on_air);
+        $this->assertFalse($first->refresh()->on_air);
+        $this->assertTrue(now()->addSeconds(90)->equalTo($break->breakEndsAt()));
+        $component->assertSee('Break 1 · 1:30');
+        $this->assertSame('{}', $this->get(route('feeds.data'))->getContent());
+
+        $component->call('showNext');
+        $this->assertFalse($break->refresh()->on_air);
+        $this->assertNull($break->breakEndsAt());
+        $component->assertSee('Idle');
+
+        $component->call('selectSection', $break->id)->set('newGroupName', 'Nope')->call('addGroup')->assertForbidden();
+        Livewire::test('pages::vmix-data')->call('removeFromRunOfShow', $break->id);
+        $this->assertModelMissing($break);
+    }
+
+    public function test_a_finished_break_puts_the_next_entry_on_air(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $this->freezeSecond();
+        $template = VmixSection::factory()->template()->create(['key' => 'interview']);
+        VmixField::factory()->for(VmixGroup::factory()->for($template, 'section'), 'group')->create(['key' => 'guest', 'value' => 'Max']);
+        $break = VmixSection::createBreak(60);
+        $next = $template->createItem('Interview 1');
+        $break->putOnAir();
+
+        $this->travel(59)->seconds();
+        $this->assertSame('{}', $this->get(route('feeds.data'))->getContent());
+        $this->assertTrue($break->refresh()->on_air);
+
+        $this->travel(1)->seconds();
+        $this->getJson(route('feeds.data'))->assertExactJson(['interview' => [['guest' => 'Max']]]);
+        $this->assertFalse($break->refresh()->on_air);
+        $this->assertTrue($next->refresh()->on_air);
+        $this->assertSame((string) $next->id, Setting::get(Setting::ShowCurrentItem));
+
+        $next->update(['on_air' => false]);
+        $lastBreak = VmixSection::createBreak(5);
+        $standalone = VmixSection::factory()->onAir()->create(['show_order' => VmixSection::nextShowOrder()]);
+        $lastBreak->putOnAir();
+        $component = Livewire::test('pages::vmix-data', ['selectedSectionId' => $lastBreak->id]);
+        $this->travel(5)->seconds();
+
+        $component->call('finishBreak')->assertSet('selectedSectionId', $standalone->id);
+
+        $this->assertFalse($lastBreak->refresh()->on_air);
+        $this->assertTrue($standalone->refresh()->on_air);
+        $this->assertFalse($next->refresh()->on_air);
+        $this->assertSame((string) $standalone->id, Setting::get(Setting::ShowCurrentItem));
     }
 
     public function test_dragging_a_section_into_the_run_of_show_adds_it_at_the_drop_position(): void
