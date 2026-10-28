@@ -16,7 +16,7 @@ new #[Title('Competitors')] class extends Component
 {
     use WithFileUploads;
 
-    public const FormFields = ['car_number', 'first_name', 'last_name', 'hometown', 'weight', 'transponder', 'accolades'];
+    public const FormFields = ['car_number', 'first_name', 'last_name', 'hometown', 'primary_division', 'weight', 'transponder', 'accolades', 'announcer_details'];
 
     public const PillMin = 1;
 
@@ -62,9 +62,11 @@ new #[Title('Competitors')] class extends Component
             'first_name' => ['required', 'string', 'max:100'],
             'last_name' => ['required', 'string', 'max:100'],
             'hometown' => ['nullable', 'string', 'max:150'],
+            'primary_division' => ['nullable', 'string', 'max:150'],
             'weight' => ['nullable', 'numeric', 'decimal:0,1', 'min:0', 'max:1000'],
             'transponder' => ['nullable', 'string', 'max:50'],
             'accolades' => ['nullable', 'string', 'max:2000'],
+            'announcer_details' => ['nullable', 'string', 'max:2000'],
         ];
     }
 
@@ -81,6 +83,7 @@ new #[Title('Competitors')] class extends Component
                     ->orWhere('last_name', 'like', $term)
                     ->orWhere('car_number', 'like', $term)
                     ->orWhere('hometown', 'like', $term)
+                    ->orWhere('primary_division', 'like', $term)
                     ->orWhere('transponder', 'like', $term));
             })
             ->when(in_array($this->sortBy, ['pill_number', 'weight'], true), fn ($query) => $query->orderByRaw("{$this->sortBy} is null"))
@@ -356,9 +359,10 @@ new #[Title('Competitors')] class extends Component
                         'last_name' => 'Last name',
                         'weight' => 'Weight',
                         'hometown' => 'Hometown',
+                        'primary_division' => 'Primary Division',
                         'transponder' => 'Transponder',
                     ] as $field => $label)
-                        <label @class(['block', 'col-span-2' => in_array($field, ['hometown', 'transponder'])])>
+                        <label @class(['block', 'col-span-2' => in_array($field, ['hometown', 'primary_division', 'transponder'])])>
                             <span class="text-xs font-semibold text-slate-500">{{ $label }}</span>
                             <input
                                 type="{{ $field === 'weight' ? 'number' : 'text' }}"
@@ -411,6 +415,19 @@ new #[Title('Competitors')] class extends Component
                             class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-2 text-sm focus:border-amber-500 focus:ring-1 focus:ring-amber-500 focus:outline-none"
                         ></textarea>
                         @error('form.accolades')
+                            <span class="text-xs text-red-600">{{ $message }}</span>
+                        @enderror
+                    </label>
+
+                    <label class="col-span-2 block sm:col-span-4">
+                        <span class="text-xs font-semibold text-slate-500">Announcer details</span>
+                        <textarea
+                            wire:model="form.announcer_details"
+                            rows="3"
+                            placeholder="Notes for the announcer sheet"
+                            class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-2 text-sm focus:border-amber-500 focus:ring-1 focus:ring-amber-500 focus:outline-none"
+                        ></textarea>
+                        @error('form.announcer_details')
                             <span class="text-xs text-red-600">{{ $message }}</span>
                         @enderror
                     </label>
@@ -545,6 +562,16 @@ new #[Title('Competitors')] class extends Component
                 target="_blank"
                 class="rounded-md bg-white px-3 py-1.5 text-sm font-semibold ring-1 ring-slate-300 hover:bg-slate-50"
             >Print entry list</a>
+            <a
+                href="{{ route('competitors.print', ['sort' => $sortBy, 'weight' => 0]) }}"
+                target="_blank"
+                class="rounded-md bg-white px-3 py-1.5 text-sm font-semibold ring-1 ring-slate-300 hover:bg-slate-50"
+            >Print without weight</a>
+            <a
+                href="{{ route('competitors.print-announcer', ['sort' => $sortBy]) }}"
+                target="_blank"
+                class="rounded-md bg-white px-3 py-1.5 text-sm font-semibold ring-1 ring-slate-300 hover:bg-slate-50"
+            >Print announcer entry list</a>
             @if (count($selected))
                 <button
                     type="button"
@@ -570,9 +597,11 @@ new #[Title('Competitors')] class extends Component
                         <th class="px-1 py-2">First</th>
                         <th class="px-1 py-2">Last</th>
                         <th class="px-1 py-2">Hometown</th>
+                        <th class="px-1 py-2">Primary Division</th>
                         <th class="w-20 px-1 py-2">Weight</th>
                         <th class="px-1 py-2">Transponder</th>
                         <th class="px-1 py-2">Accolades</th>
+                        <th class="px-1 py-2">Announcer details</th>
                         <th class="w-28 px-3 py-2"></th>
                     </tr>
                 </thead>
@@ -612,7 +641,7 @@ new #[Title('Competitors')] class extends Component
                                     >Draw pill</button>
                                 @endif
                             </td>
-                            @foreach (['car_number', 'first_name', 'last_name', 'hometown', 'weight', 'transponder', 'accolades'] as $field)
+                            @foreach (['car_number', 'first_name', 'last_name', 'hometown', 'primary_division', 'weight', 'transponder', 'accolades', 'announcer_details'] as $field)
                                 <td class="px-1 py-1">
                                     <input
                                         type="{{ $field === 'weight' ? 'number' : 'text' }}"
@@ -642,7 +671,7 @@ new #[Title('Competitors')] class extends Component
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="11" class="px-3 py-10 text-center text-slate-400">No competitors yet. Click “+ Add competitor”.</td>
+                            <td colspan="13" class="px-3 py-10 text-center text-slate-400">No competitors yet. Click “+ Add competitor”.</td>
                         </tr>
                     @endforelse
                 </tbody>

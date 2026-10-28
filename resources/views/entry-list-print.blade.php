@@ -41,10 +41,12 @@
                 print-color-adjust: exact;
             }
             td { border-bottom: 1px solid #d1d5db; }
-            .pos, .car, .driver, .pill, .weight { white-space: nowrap; width: 1%; }
+            .pos, .car, .driver, .pill, .weight, .division { white-space: nowrap; width: 1%; }
             .pos, .car { font-weight: 700; }
-            .hometown { width: 18%; }
-            .accolades { width: 42%; }
+            .hometown { width: 16%; }
+            .division { width: 12%; }
+            .accolades { width: 28%; }
+            .announcer { width: 28%; }
             .pill, .weight { text-align: center; }
             .empty { padding: 10px 6px; color: #64748b; }
             @page { size: letter landscape; margin: 0.5in; }
@@ -85,16 +87,24 @@
                 </thead>
                 <tbody class="race-block">
                     <tr class="race-start">
-                        <th class="race-title" colspan="{{ $sheetColumns }}">Entry list</th>
+                        <th class="race-title" colspan="{{ $sheetColumns }}">{{ $sheetTitle }}</th>
                     </tr>
                     <tr class="cols">
                         <th class="pos">Pos</th>
                         <th class="car">Car</th>
                         <th class="driver">Driver</th>
                         <th class="hometown">Hometown</th>
-                        <th class="weight">Weight</th>
+                        <th class="division">Primary Division</th>
+                        @if ($showWeight)
+                            <th class="weight">Weight</th>
+                        @endif
                         <th class="accolades">Accolades</th>
-                        <th class="pill">Pill</th>
+                        @if ($showAnnouncerDetails)
+                            <th class="announcer">Announcer Details</th>
+                        @endif
+                        @if ($showPill)
+                            <th class="pill">Pill</th>
+                        @endif
                     </tr>
                     @forelse ($competitors as $competitor)
                         <tr>
@@ -102,9 +112,17 @@
                             <td class="car">{{ $competitor->car_number }}</td>
                             <td class="driver">{{ $competitor->full_name }}</td>
                             <td class="hometown">{{ $competitor->hometown }}</td>
-                            <td class="weight">{{ $competitor->formattedWeight() }}</td>
+                            <td class="division">{{ $competitor->primary_division }}</td>
+                            @if ($showWeight)
+                                <td class="weight">{{ $competitor->formattedWeight() }}</td>
+                            @endif
                             <td class="accolades">{{ $competitor->accolades }}</td>
-                            <td class="pill">{{ $competitor->pill_number }}</td>
+                            @if ($showAnnouncerDetails)
+                                <td class="announcer">{{ $competitor->announcer_details }}</td>
+                            @endif
+                            @if ($showPill)
+                                <td class="pill">{{ $competitor->pill_number }}</td>
+                            @endif
                         </tr>
                     @empty
                         <tr>

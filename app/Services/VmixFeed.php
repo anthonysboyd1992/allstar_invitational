@@ -73,6 +73,7 @@ class VmixFeed
                 'Headshot.Source' => $this->headshotFor($competitor),
                 'FullName.Text' => (string) $competitor?->full_name,
                 'Hometown.Text' => (string) $competitor?->hometown,
+                'PrimaryDivision.Text' => (string) $competitor?->primary_division,
                 'Accolades.Text' => (string) $competitor?->accolades,
                 'Mode' => Setting::get(Setting::DriverMode, 'name_only'),
             ],
@@ -137,6 +138,7 @@ class VmixFeed
                 "LastName{$slot}.Text" => '',
                 "num_name{$slot}.Text" => '',
                 "Hometown{$slot}.Text" => '',
+                "PrimaryDivision{$slot}.Text" => '',
                 "DriverKey{$slot}" => '',
                 "Headshot{$slot}.Source" => $this->headshotFor(null),
             ];
@@ -155,6 +157,7 @@ class VmixFeed
             "LastName{$slot}.Text" => $competitor->last_name,
             "num_name{$slot}.Text" => $isLeft ? "{$number} - {$fullName}" : "{$fullName} - {$number}",
             "Hometown{$slot}.Text" => (string) $competitor->hometown,
+            "PrimaryDivision{$slot}.Text" => (string) $competitor->primary_division,
             "DriverKey{$slot}" => $competitor->driverKey($className),
             "Headshot{$slot}.Source" => $this->headshotFor($competitor),
         ];

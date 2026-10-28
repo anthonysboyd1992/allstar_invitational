@@ -38,8 +38,10 @@ class CompetitorsPageTest extends TestCase
                 'first_name' => 'Gat',
                 'last_name' => 'Leytham',
                 'hometown' => 'Marshalltown IA',
+                'primary_division' => 'IMCA Modified',
                 'weight' => '185',
                 'accolades' => '3x track champion',
+                'announcer_details' => 'Hometown favorite, first Allstar start',
                 'transponder' => '1234567',
             ])
             ->call('save')
@@ -51,8 +53,10 @@ class CompetitorsPageTest extends TestCase
             'first_name' => 'Gat',
             'last_name' => 'Leytham',
             'hometown' => 'Marshalltown IA',
+            'primary_division' => 'IMCA Modified',
             'weight' => 185,
             'accolades' => '3x track champion',
+            'announcer_details' => 'Hometown favorite, first Allstar start',
             'transponder' => '1234567',
         ]);
     }
@@ -72,17 +76,28 @@ class CompetitorsPageTest extends TestCase
 
     public function test_edit_modal_loads_and_saves_accolades(): void
     {
-        $competitor = Competitor::factory()->create(['accolades' => 'Rookie of the Year']);
+        $competitor = Competitor::factory()->create([
+            'accolades' => 'Rookie of the Year',
+            'primary_division' => 'Stock Car',
+            'announcer_details' => 'Second year in the invitational',
+        ]);
 
         Livewire::test('pages::competitors')
             ->call('openEditModal', $competitor->id)
             ->assertSet('form.accolades', 'Rookie of the Year')
+            ->assertSet('form.primary_division', 'Stock Car')
+            ->assertSet('form.announcer_details', 'Second year in the invitational')
             ->set('form.accolades', '2025 Champion')
+            ->set('form.primary_division', 'IMCA Modified')
+            ->set('form.announcer_details', 'Defending invitational champ')
             ->call('save')
             ->assertHasNoErrors()
             ->assertSet('showFormModal', false);
 
-        $this->assertSame('2025 Champion', $competitor->refresh()->accolades);
+        $competitor->refresh();
+        $this->assertSame('2025 Champion', $competitor->accolades);
+        $this->assertSame('IMCA Modified', $competitor->primary_division);
+        $this->assertSame('Defending invitational champ', $competitor->announcer_details);
         $this->assertSame(1, Competitor::query()->count());
     }
 

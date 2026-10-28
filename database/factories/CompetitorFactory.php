@@ -23,8 +23,10 @@ class CompetitorFactory extends Factory
             'first_name' => fake()->firstName(),
             'last_name' => fake()->lastName(),
             'hometown' => fake()->city().' '.fake()->stateAbbr(),
+            'primary_division' => null,
             'weight' => fake()->randomFloat(1, 130, 260),
             'accolades' => null,
+            'announcer_details' => null,
             'transponder' => (string) fake()->numberBetween(1000000, 9999999),
         ];
     }

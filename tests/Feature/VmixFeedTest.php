@@ -120,6 +120,28 @@ class VmixFeedTest extends TestCase
         $this->assertArrayNotHasKey('Accolades2.Text', $page);
     }
 
+    public function test_driver_and_lineup_feeds_include_primary_division_not_announcer_details(): void
+    {
+        $race = Race::factory()->create();
+        $driver = Competitor::factory()->create([
+            'primary_division' => 'IMCA Modified',
+            'announcer_details' => 'Three-time feature winner at Hartford',
+        ]);
+        $race->syncLineup([$driver->id]);
+        Setting::put(Setting::ActiveRace, (string) $race->id);
+        Setting::put(Setting::ActiveDriver, (string) $driver->id);
+
+        $page = $this->getJson(route('feeds.lineup'))->json('Lineup.0');
+        $this->assertSame('IMCA Modified', $page['PrimaryDivision1.Text']);
+        $this->assertSame('', $page['PrimaryDivision2.Text']);
+        $this->assertArrayNotHasKey('AnnouncerDetails1.Text', $page);
+        $this->assertArrayNotHasKey('AnnouncerDetails2.Text', $page);
+
+        $driverFeed = $this->getJson(route('feeds.driver'))->json('0');
+        $this->assertSame('IMCA Modified', $driverFeed['PrimaryDivision.Text']);
+        $this->assertArrayNotHasKey('AnnouncerDetails.Text', $driverFeed);
+    }
+
     public function test_lineup_feed_returns_an_empty_page_when_no_race_is_live(): void
     {
         $page = $this->getJson(route('feeds.lineup'))->assertOk()->json('Lineup.0');
@@ -192,6 +214,7 @@ class VmixFeedTest extends TestCase
             'Headshot.Source' => VmixFeed::clearUrl(256, 256),
             'FullName.Text' => 'Scott Drake',
             'Hometown.Text' => 'Diamond MO',
+            'PrimaryDivision.Text' => '',
             'Accolades.Text' => '2025 Champion',
             'Mode' => 'name_only',
         ]], json_decode($response->getContent(), true));

@@ -15,7 +15,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
 use RuntimeException;
 
-#[Fillable(['pill_number', 'car_number', 'first_name', 'last_name', 'hometown', 'weight', 'accolades', 'transponder', 'headshot_path'])]
+#[Fillable(['pill_number', 'car_number', 'first_name', 'last_name', 'hometown', 'primary_division', 'weight', 'accolades', 'announcer_details', 'transponder', 'headshot_path'])]
 class Competitor extends Model
 {
     /** @use HasFactory<CompetitorFactory> */

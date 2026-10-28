@@ -12,20 +12,33 @@ use Illuminate\Validation\Rule;
 class EntryListPrintController extends Controller
 {
     /**
-     * Landscape letter entry list of every competitor, with weight.
+     * Landscape letter entry list of every competitor.
+     * Weight is included unless ?weight=0. The announcer copy omits weight and pill.
      */
     public function __invoke(Request $request): View
     {
         $validated = $request->validate([
             'sort' => ['sometimes', Rule::in(['car_number', 'pill_number', 'last_name', 'weight'])],
+            'weight' => ['sometimes', 'boolean'],
         ]);
 
-        $competitors = $this->sortedCompetitors($validated['sort'] ?? 'car_number');
+        $announcer = $request->routeIs('competitors.print-announcer');
+        $showWeight = ! $announcer && $request->boolean('weight', true);
+        $showPill = ! $announcer;
+        $sheetTitle = $announcer ? 'Announcer Entry List' : 'Entry list';
+        $sheetColumns = 6
+            + ($showWeight ? 1 : 0)
+            + ($announcer ? 1 : 0)
+            + ($showPill ? 1 : 0);
 
         return view('entry-list-print', [
-            'competitors' => $competitors,
-            'sheetColumns' => 7,
-            'title' => 'Entry list',
+            'competitors' => $this->sortedCompetitors($validated['sort'] ?? 'car_number'),
+            'showWeight' => $showWeight,
+            'showPill' => $showPill,
+            'showAnnouncerDetails' => $announcer,
+            'sheetTitle' => $sheetTitle,
+            'sheetColumns' => $sheetColumns,
+            'title' => $sheetTitle,
             ...Setting::printLetterhead(),
         ]);
     }

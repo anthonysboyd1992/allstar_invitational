@@ -17,6 +17,7 @@ Route::middleware('auth')->group(function () {
     Route::middleware('can:access-competitors')->group(function () {
         Route::livewire('/competitors', 'pages::competitors')->name('competitors');
         Route::get('/competitors/print', EntryListPrintController::class)->name('competitors.print');
+        Route::get('/competitors/print/announcer', EntryListPrintController::class)->name('competitors.print-announcer');
     });
     Route::livewire('/cars', 'pages::cars')->middleware('can:access-cars')->name('cars');
     Route::middleware('can:access-lineups')->group(function () {
