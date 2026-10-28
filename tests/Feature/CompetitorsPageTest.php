@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Competitor;
 use App\Models\User;
+use Database\Seeders\CompetitorSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -249,5 +250,37 @@ class CompetitorsPageTest extends TestCase
 
         $component->call('updateField', $competitor->id, 'weight', '150.85');
         $this->assertSame('150.8', $competitor->refresh()->weight);
+    }
+
+    public function test_competitor_seeder_skips_outside_local(): void
+    {
+        $this->seed(CompetitorSeeder::class);
+
+        $this->assertSame(0, Competitor::query()->count());
+    }
+
+    public function test_competitor_seeder_creates_sample_drivers_in_local(): void
+    {
+        $this->app['env'] = 'local';
+
+        $this->seed(CompetitorSeeder::class);
+
+        $this->assertSame(count(CompetitorSeeder::Samples), Competitor::query()->count());
+        $this->assertSame('Collin', Competitor::query()->where('last_name', 'Thirlby')->value('first_name'));
+    }
+
+    public function test_competitor_seeder_keeps_an_existing_headshot(): void
+    {
+        $this->app['env'] = 'local';
+        $existing = Competitor::factory()->create([
+            'first_name' => 'Collin',
+            'last_name' => 'Thirlby',
+            'headshot_path' => 'headshots/keep-me.png',
+        ]);
+
+        $this->seed(CompetitorSeeder::class);
+
+        $this->assertSame('headshots/keep-me.png', $existing->refresh()->headshot_path);
+        $this->assertSame(count(CompetitorSeeder::Samples), Competitor::query()->count());
     }
 }

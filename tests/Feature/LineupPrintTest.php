@@ -59,19 +59,34 @@ class LineupPrintTest extends TestCase
 
         $this->get(route('lineups.print', ['races' => [$race->id]]))
             ->assertOk()
-            ->assertSee('MOVE OVER MICHIGAN DIRT LATE MODEL SERIES HEAT RACE 1')
+            ->assertSee('MOVE OVER MICHIGAN DIRT LATE MODEL SERIES - HEAT RACE 1')
             ->assertSee('Pos')
             ->assertSee('Kart Assignment')
+            ->assertSee('.kart { font-weight: 700; text-align: center', false)
             ->assertSee('Conner Zbozien')
             ->assertSee('St. Clair Shores, MI')
             ->assertSee('2024 Flat Rock Speedway Track Champion')
             ->assertSee('160')
-            ->assertSee('5 SLOWEST')
+            ->assertSee('class="kart">5</td>', false)
             ->assertSee('Collin Thirlby')
-            ->assertSee('1 FAST')
+            ->assertSee('class="kart">1</td>', false)
+            ->assertDontSee('SLOWEST')
+            ->assertDontSee('FAST')
             ->assertSee('images/letterhead-left.png', false)
             ->assertSee('images/letterhead-right.png', false)
-            ->assertSee('8.5in 11in')
+            ->assertSee('letterhead-left')
+            ->assertSee('1.25in')
+            ->assertSee('letterhead-right')
+            ->assertSee('.letterhead-right { height: 0.7in', false)
+            ->assertSee('letter landscape')
+            ->assertSee('11in')
+            ->assertSee('class="accolades"', false)
+            ->assertSee('sheet-pages')
+            ->assertSee('table-header-group')
+            ->assertSee('print-color-adjust: exact')
+            ->assertSee('#ee6426')
+            ->assertSee('race-block')
+            ->assertSee('page-break-inside: avoid')
             ->assertDontSee('Heat Race 2');
     }
 
@@ -85,7 +100,8 @@ class LineupPrintTest extends TestCase
         $this->get(route('lineups.print'))
             ->assertOk()
             ->assertSee('HEAT 1')
-            ->assertSee('FEATURE');
+            ->assertSee('FEATURE')
+            ->assertDontSee('PUT SPONSOR HERE');
     }
 
     public function test_printed_heats_appear_in_numbered_order(): void
@@ -100,7 +116,13 @@ class LineupPrintTest extends TestCase
 
         $this->get(route('lineups.print'))
             ->assertOk()
-            ->assertSeeInOrder(['<h1>HEAT 1</h1>', '<h1>HEAT 2</h1>', '<h1>HEAT 5</h1>', '<h1>HEAT 10</h1>', '<h1>FEATURE</h1>'], false);
+            ->assertSeeInOrder([
+                '>HEAT 1</th>',
+                '>HEAT 2</th>',
+                '>HEAT 5</th>',
+                '>HEAT 10</th>',
+                '>FEATURE</th>',
+            ], false);
     }
 
     public function test_print_picker_lists_heats_in_numbered_order(): void

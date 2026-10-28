@@ -110,32 +110,22 @@ class Race extends Model
     }
 
     /**
-     * Sponsor plus race name, the way it prints on a heat sheet.
+     * Sponsor, then race name, the way it prints on a heat sheet (e.g. "ACME - HEAT 1").
      */
     public function printedTitle(): string
     {
-        return strtoupper(trim(collect([$this->sponsor, $this->name])->filter()->implode(' ')));
+        $name = strtoupper(trim($this->name));
+        $sponsor = strtoupper(trim((string) $this->sponsor));
+
+        return $sponsor !== '' ? $sponsor.' - '.$name : $name;
     }
 
     /**
-     * Assigned invitational car and its speed rank in this race's group, e.g. "1 FAST".
+     * Assigned invitational car number for the printed heat sheet.
      */
     public function kartAssignment(RaceEntry $entry): string
     {
-        $car = $entry->car;
-
-        if ($car === null) {
-            return '';
-        }
-
-        $cars = Car::sortFastestFirst($this->poolCars());
-        $rank = $cars->search(fn (Car $item) => $item->id === $car->id);
-
-        if ($rank === false) {
-            return $car->number;
-        }
-
-        return trim($car->number.' '.Car::speedLabel($rank, $cars->count()));
+        return $entry->car?->number ?? '';
     }
 
     /**

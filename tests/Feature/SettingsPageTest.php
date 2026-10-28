@@ -22,7 +22,7 @@ class SettingsPageTest extends TestCase
         $this->get(route('settings'))
             ->assertOk()
             ->assertSee('Letterhead logos')
-            ->assertSee('Left')
+            ->assertSee('Left (primary)')
             ->assertSee('Right');
     }
 

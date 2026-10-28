@@ -87,14 +87,14 @@ new #[Title('Settings')] class extends Component
     <section class="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
         <div class="border-b border-slate-100 px-4 py-3">
             <h2 class="font-black uppercase">Letterhead logos</h2>
-            <p class="text-sm text-slate-500">Printed on the left and right of lineup sheets. PNG, JPG, GIF, or WebP.</p>
+            <p class="text-sm text-slate-500">The left logo is the main mark on printed lineups; the right logo stays smaller. PNG, JPG, GIF, or WebP.</p>
         </div>
         <div class="grid gap-4 p-4 sm:grid-cols-2">
-            @foreach (['left' => 'Left', 'right' => 'Right'] as $side => $label)
+            @foreach (['left' => 'Left (primary)', 'right' => 'Right'] as $side => $label)
                 <div wire:key="letterhead-{{ $side }}" class="space-y-2">
                     <span class="text-xs font-semibold text-slate-500">{{ $label }}</span>
-                    <div class="flex h-28 items-center justify-center rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200">
-                        <img src="{{ $this->logos[$side] }}" alt="{{ $label }} letterhead" class="max-h-full max-w-full object-contain">
+                    <div @class(['flex items-center justify-center rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200', 'h-36' => $side === 'left', 'h-28' => $side === 'right'])>
+                        <img src="{{ $this->logos[$side] }}" alt="{{ $label }} letterhead" @class(['max-h-full max-w-full object-contain', 'object-left' => $side === 'left', 'object-right' => $side === 'right'])>
                     </div>
                     <div class="flex flex-wrap items-center gap-2">
                         <label class="inline-block cursor-pointer rounded-md bg-slate-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-700">

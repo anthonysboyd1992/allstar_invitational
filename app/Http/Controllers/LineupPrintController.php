@@ -10,7 +10,7 @@ use Illuminate\Http\Request;
 class LineupPrintController extends Controller
 {
     /**
-     * Printable letter-size heat sheet for the selected races.
+     * Printable landscape letter heat sheet for the selected races.
      */
     public function __invoke(Request $request): View
     {

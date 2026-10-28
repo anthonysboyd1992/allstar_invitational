@@ -540,7 +540,7 @@ new #[Title('Races & Lineups')] class extends Component
                     <h2 class="text-lg font-black uppercase">Print lineups</h2>
                     <button type="button" wire:click="closePrintPicker" class="rounded px-2 text-2xl leading-none text-slate-400 hover:text-slate-900">&times;</button>
                 </div>
-                <p class="mb-3 text-sm text-slate-500">Choose the races to put on the letter-size sheet.</p>
+                <p class="mb-3 text-sm text-slate-500">Choose the races to put on the landscape letter sheet.</p>
                 <div class="mb-3 flex gap-2 text-xs font-bold">
                     <button type="button" wire:click="selectAllPrintRaces" class="rounded px-2 py-1 ring-1 ring-slate-300 hover:bg-slate-50">Select all</button>
                     <button type="button" wire:click="clearPrintRaces" class="rounded px-2 py-1 ring-1 ring-slate-300 hover:bg-slate-50">Clear</button>
@@ -629,7 +629,7 @@ new #[Title('Races & Lineups')] class extends Component
 
                     <label class="col-span-2 block">
                         <span class="text-xs font-semibold text-slate-500">Sponsor</span>
-                        <input wire:model="raceForm.sponsor" class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-2 text-sm focus:border-amber-500 focus:outline-none">
+                        <input wire:model="raceForm.sponsor" placeholder="Put sponsor here" class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-2 text-sm focus:border-amber-500 focus:outline-none">
                         @error('raceForm.sponsor') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
                     </label>
                 </div>

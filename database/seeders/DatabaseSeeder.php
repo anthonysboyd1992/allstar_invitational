@@ -22,7 +22,10 @@ class DatabaseSeeder extends Seeder
 
         if (app()->environment('local')) {
             $admin->update(['permissions' => User::Presets['everything']['areas']]);
-            $this->call(CarSeeder::class);
+            $this->call([
+                CarSeeder::class,
+                CompetitorSeeder::class,
+            ]);
         }
     }
 }
