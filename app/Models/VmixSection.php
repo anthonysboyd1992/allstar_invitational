@@ -346,7 +346,14 @@ class VmixSection extends Model
 
         $fields = $this->groups->flatMap->fields;
         $driverIds = $fields->filter->isDriver()->pluck('live_value')->filter()->map(fn ($id) => (int) $id)->unique();
-        $drivers = $driverIds->isEmpty() ? collect() : Competitor::query()->whereKey($driverIds)->get()->keyBy('id');
+        $raceId = (int) Setting::get(Setting::ActiveRace);
+        $drivers = $driverIds->isEmpty() ? collect() : Competitor::query()
+            ->whereKey($driverIds)
+            ->when($raceId > 0, fn ($query) => $query->with([
+                'entries' => fn ($entries) => $entries->where('race_id', $raceId)->with('car'),
+            ]))
+            ->get()
+            ->keyBy('id');
 
         return $fields
             ->flatMap(fn (VmixField $field) => $field->feedValues($drivers))

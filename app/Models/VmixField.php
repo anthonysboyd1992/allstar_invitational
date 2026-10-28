@@ -42,7 +42,7 @@ class VmixField extends Model
     /**
      * Keys a driver field expands to in the feed, as "{field key}_{suffix}".
      */
-    public const DriverKeySuffixes = ['number', 'name', 'first_name', 'last_name', 'hometown', 'accolades', 'headshot'];
+    public const DriverKeySuffixes = ['number', 'name', 'first_name', 'last_name', 'hometown', 'accolades', 'headshot', 'assigned_car'];
 
     public const ImageDirectory = 'vmix';
 
@@ -131,6 +131,7 @@ class VmixField extends Model
             'hometown' => (string) $driver?->hometown,
             'accolades' => (string) $driver?->accolades,
             'headshot' => app(VmixFeed::class)->headshotFor($driver),
+            'assigned_car' => (string) ($driver?->relationLoaded('entries') ? $driver->entries->first()?->car?->number : ''),
         ];
 
         return collect(self::DriverKeySuffixes)

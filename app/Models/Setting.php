@@ -46,7 +46,7 @@ class Setting extends Model
     {
         $id = static::get(self::ActiveRace);
 
-        return $id ? Race::query()->with(['raceType', 'entries.competitor'])->find($id) : null;
+        return $id ? Race::query()->with(['raceType', 'entries.competitor', 'entries.car'])->find($id) : null;
     }
 
     /**

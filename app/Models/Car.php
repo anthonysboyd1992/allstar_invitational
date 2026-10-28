@@ -6,6 +6,8 @@ use Database\Factories\CarFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Collection;
 
 #[Fillable(['number', 'time_ms', 'sort_order'])]
@@ -13,6 +15,27 @@ class Car extends Model
 {
     /** @use HasFactory<CarFactory> */
     use HasFactory;
+
+    /**
+     * Race types that draw this car from their pool.
+     *
+     * @return BelongsToMany<RaceType, $this>
+     */
+    public function raceTypes(): BelongsToMany
+    {
+        return $this->belongsToMany(RaceType::class)
+            ->withPivot('sort_order')
+            ->withTimestamps()
+            ->orderByPivot('sort_order');
+    }
+
+    /**
+     * @return HasMany<RaceEntry, $this>
+     */
+    public function entries(): HasMany
+    {
+        return $this->hasMany(RaceEntry::class);
+    }
 
     /**
      * Order by car number the way people read them (01, 1, 2, 4, 11, 4A).
@@ -27,6 +50,33 @@ class Car extends Model
         return $cars->sort(fn (Car $a, Car $b): int => (blank($a->number) <=> blank($b->number))
             ?: strnatcasecmp((string) $a->number, (string) $b->number)
             ?: strcmp((string) $a->number, (string) $b->number))->values();
+    }
+
+    /**
+     * Fastest first: timed cars by time, then pool/manual order, then number.
+     *
+     * @template TCollection of \Illuminate\Support\Collection<int, Car>
+     *
+     * @param  TCollection  $cars
+     * @return TCollection
+     */
+    public static function sortFastestFirst(Collection $cars): Collection
+    {
+        return $cars->sort(function (Car $a, Car $b): int {
+            $byTime = ($a->time_ms === null) <=> ($b->time_ms === null)
+                ?: ($a->time_ms ?? 0) <=> ($b->time_ms ?? 0);
+
+            if ($byTime !== 0) {
+                return $byTime;
+            }
+
+            $aOrder = $a->pivot?->sort_order ?? $a->sort_order;
+            $bOrder = $b->pivot?->sort_order ?? $b->sort_order;
+
+            return $aOrder <=> $bOrder
+                ?: strnatcasecmp((string) $a->number, (string) $b->number)
+                ?: strcmp((string) $a->number, (string) $b->number);
+        })->values();
     }
 
     /**

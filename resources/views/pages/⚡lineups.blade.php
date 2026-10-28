@@ -1,11 +1,13 @@
 <?php
 
+use App\Models\Car;
 use App\Models\Competitor;
 use App\Models\Race;
 use App\Models\RaceEntry;
 use App\Models\RaceType;
 use App\Models\Setting;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Validator;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -19,6 +21,8 @@ new #[Title('Races & Lineups')] class extends Component
     public string $newTypeName = '';
 
     public int $newTypeRaceCount = 1;
+
+    public ?int $newTypeCarsPerRace = null;
 
     public ?int $editingRaceId = null;
 
@@ -34,10 +38,19 @@ new #[Title('Races & Lineups')] class extends Component
     public function raceTypes(): Collection
     {
         return RaceType::query()
-            ->with('races.entries.competitor')
+            ->with(['races.entries.competitor', 'races.entries.car', 'cars'])
             ->orderBy('sort_order')
             ->orderBy('id')
             ->get();
+    }
+
+    /**
+     * @return Collection<int, Car>
+     */
+    #[Computed]
+    public function cars(): Collection
+    {
+        return Car::query()->orderBy('sort_order')->orderBy('id')->get();
     }
 
     /**
@@ -87,12 +100,18 @@ new #[Title('Races & Lineups')] class extends Component
         $this->validate([
             'newTypeName' => ['required', 'string', 'max:100'],
             'newTypeRaceCount' => ['required', 'integer', 'min:0', 'max:50'],
-        ], attributes: ['newTypeName' => 'race type name', 'newTypeRaceCount' => 'number of races']);
+            'newTypeCarsPerRace' => ['nullable', 'integer', 'min:1', 'max:50'],
+        ], attributes: [
+            'newTypeName' => 'race type name',
+            'newTypeRaceCount' => 'number of races',
+            'newTypeCarsPerRace' => 'cars per race',
+        ]);
 
         $name = trim($this->newTypeName);
         $raceType = RaceType::query()->create([
             'name' => $name,
             'sort_order' => (int) RaceType::query()->max('sort_order') + 1,
+            'cars_per_race' => $this->newTypeCarsPerRace,
         ]);
 
         for ($number = 1; $number <= $this->newTypeRaceCount; $number++) {
@@ -102,8 +121,78 @@ new #[Title('Races & Lineups')] class extends Component
             ]);
         }
 
-        $this->reset('newTypeName', 'newTypeRaceCount');
+        $this->reset('newTypeName', 'newTypeRaceCount', 'newTypeCarsPerRace');
         $this->dispatch('notify', message: "Added {$name}.");
+    }
+
+    public function updateCarsPerRace(int $raceTypeId, mixed $value): void
+    {
+        $value = is_string($value) ? trim($value) : $value;
+        $value = $value === '' ? null : $value;
+
+        $validator = Validator::make(
+            ['cars_per_race' => $value],
+            ['cars_per_race' => ['nullable', 'integer', 'min:1', 'max:50']],
+            [],
+            ['cars_per_race' => 'cars per race'],
+        );
+
+        if ($validator->fails()) {
+            $this->dispatch('notify', message: $validator->errors()->first(), type: 'error');
+
+            return;
+        }
+
+        $raceType = RaceType::query()->findOrFail($raceTypeId);
+        $raceType->update(['cars_per_race' => $validator->validated()['cars_per_race']]);
+        $raceType->assignCarsByWeight();
+    }
+
+    public function togglePoolCar(int $raceTypeId, int $carId): void
+    {
+        $raceType = RaceType::query()->findOrFail($raceTypeId);
+        $car = Car::query()->findOrFail($carId);
+
+        if ($raceType->cars()->where('cars.id', $car->id)->exists()) {
+            $raceType->cars()->detach($car->id);
+            $raceType->compactPoolOrder();
+        } else {
+            $raceType->cars()->attach($car->id, ['sort_order' => $raceType->cars()->count()]);
+        }
+
+        $raceType->assignCarsByWeight();
+    }
+
+    public function sortPoolByTime(int $raceTypeId): void
+    {
+        $raceType = RaceType::query()->findOrFail($raceTypeId);
+        $raceType->sortPoolByTime();
+        $raceType->assignCarsByWeight();
+    }
+
+    /**
+     * Drag-and-drop handler for a type's car pool. Position 0 is first in the rotation.
+     */
+    public function sortPool(int|string $carId, int $position, int|string|null $raceTypeId = null): void
+    {
+        $raceType = RaceType::query()->findOrFail((int) $raceTypeId);
+        $pool = $raceType->cars()->get();
+        $moving = $pool->firstWhere('id', (int) $carId);
+
+        if (! $moving) {
+            return;
+        }
+
+        $pool = $pool->reject(fn (Car $car) => $car->id === $moving->id)->values();
+        $pool->splice(max(0, min($position, $pool->count())), 0, [$moving]);
+        $pool->each(fn (Car $car, int $index) => $raceType->cars()->updateExistingPivot($car->id, ['sort_order' => $index]));
+        $raceType->assignCarsByWeight();
+    }
+
+    public function assignCarsByWeight(int $raceTypeId): void
+    {
+        RaceType::query()->findOrFail($raceTypeId)->assignCarsByWeight();
+        $this->dispatch('notify', message: 'Assigned cars by weight (heaviest to fastest).');
     }
 
     public function renameRaceType(int $raceTypeId, string $name): void
@@ -178,6 +267,8 @@ new #[Title('Races & Lineups')] class extends Component
         ])['raceForm'];
 
         $race->update(array_map(fn ($value) => $value === '' ? null : $value, $data));
+        $race->unsetRelation('raceType');
+        $race->assignCarsByWeight();
 
         $this->closeRaceEditor();
         $this->dispatch('notify', message: "Saved {$race->name}.");
@@ -441,10 +532,15 @@ new #[Title('Races & Lineups')] class extends Component
                     <span class="text-xs font-semibold text-slate-500">Races</span>
                     <input type="number" min="0" max="50" wire:model="newTypeRaceCount" class="mt-0.5 block w-20 rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
                 </label>
+                <label class="block">
+                    <span class="text-xs font-semibold text-slate-500">Cars/race</span>
+                    <input type="number" min="1" max="50" wire:model="newTypeCarsPerRace" placeholder="all" class="mt-0.5 block w-20 rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
+                </label>
                 <button type="submit" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-700">Add type</button>
             </form>
             @error('newTypeName') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
             @error('newTypeRaceCount') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
+            @error('newTypeCarsPerRace') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
 
             @if ($this->raceTypes->isNotEmpty())
                 <div class="ml-auto flex flex-wrap gap-1 text-sm font-semibold">
@@ -475,11 +571,78 @@ new #[Title('Races & Lineups')] class extends Component
                         wire:confirm="Delete {{ $raceType->name }} and all of its races?"
                         class="rounded-md px-2.5 py-1 text-xs font-bold text-red-600 hover:bg-red-50"
                     >Delete type</button>
+                    <label class="ml-auto flex items-center gap-1 text-xs font-semibold text-slate-500">
+                        Cars/race
+                        <input
+                            type="number"
+                            min="1"
+                            max="50"
+                            value="{{ $raceType->cars_per_race }}"
+                            wire:change="updateCarsPerRace({{ $raceType->id }}, $event.target.value)"
+                            placeholder="all"
+                            class="w-14 rounded-md border border-slate-300 px-1.5 py-1 text-sm font-bold text-slate-900 focus:border-amber-500 focus:outline-none"
+                        >
+                    </label>
+                    <button
+                        type="button"
+                        wire:click="sortPoolByTime({{ $raceType->id }})"
+                        @disabled($raceType->cars->isEmpty())
+                        class="rounded-md px-2.5 py-1 text-xs font-bold ring-1 ring-slate-300 hover:bg-slate-50 disabled:opacity-40"
+                    >Fastest first</button>
+                    <button
+                        type="button"
+                        wire:click="assignCarsByWeight({{ $raceType->id }})"
+                        @disabled($raceType->cars->isEmpty())
+                        class="rounded-md bg-amber-400 px-2.5 py-1 text-xs font-black text-slate-900 hover:bg-amber-300 disabled:opacity-40"
+                    >Assign by weight</button>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-1 rounded-lg bg-white px-2 py-1.5 ring-1 ring-slate-200">
+                    <span class="mr-1 text-[10px] font-black tracking-wide text-slate-400 uppercase">Car pool</span>
+                    <div
+                        wire:sort="sortPool"
+                        wire:sort:group="car-pool-{{ $raceType->id }}"
+                        wire:sort:group-id="{{ $raceType->id }}"
+                        class="flex flex-wrap items-center gap-1"
+                    >
+                        @foreach ($raceType->cars as $car)
+                            <span
+                                wire:key="pool-{{ $raceType->id }}-{{ $car->id }}"
+                                wire:sort:item="{{ $car->id }}"
+                                class="inline-flex items-center rounded-md bg-amber-400 text-xs font-black text-slate-900"
+                            >
+                                <span wire:sort:handle title="Drag to set rotation order" class="cursor-grab px-1 text-amber-700 select-none">&#10303;</span>
+                                <span class="pr-1">{{ $car->number }}</span>
+                                <button
+                                    type="button"
+                                    wire:sort:ignore
+                                    wire:click="togglePoolCar({{ $raceType->id }}, {{ $car->id }})"
+                                    title="Remove {{ $car->number }} from {{ $raceType->name }}"
+                                    class="rounded-r-md px-1 hover:bg-amber-300"
+                                >&times;</button>
+                            </span>
+                        @endforeach
+                    </div>
+                    @foreach ($this->cars->reject(fn (Car $car) => $raceType->cars->contains('id', $car->id)) as $car)
+                        <button
+                            type="button"
+                            wire:key="add-pool-{{ $raceType->id }}-{{ $car->id }}"
+                            wire:click="togglePoolCar({{ $raceType->id }}, {{ $car->id }})"
+                            title="Add {{ $car->number }} to {{ $raceType->name }}"
+                            class="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-bold text-slate-600 hover:bg-amber-100"
+                        >{{ $car->number }}</button>
+                    @endforeach
+                    @if ($this->cars->isEmpty())
+                        <p class="text-xs text-slate-400">
+                            No cars yet. @can('access-cars')<a href="{{ route('cars') }}" wire:navigate class="text-amber-600 underline">Add cars</a>@else Add them on the Cars page.@endcan
+                        </p>
+                    @endif
                 </div>
 
                 <div class="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
                     @forelse ($raceType->races as $race)
                         @php($isLive = $this->activeRaceId === $race->id)
+                        @php($raceCars = $race->poolCars())
                         <div
                             wire:key="race-{{ $race->id }}"
                             wire:click="goLive({{ $race->id }})"
@@ -493,7 +656,7 @@ new #[Title('Races & Lineups')] class extends Component
                             <div class="border-b border-slate-100 px-3 py-2">
                                 <div class="flex items-center gap-2">
                                     <span class="min-w-0 flex-1 truncate font-bold">{{ $race->name }}</span>
-                                    <span class="text-xs text-slate-400">{{ $race->entries->count() }} cars</span>
+                                    <span class="text-xs text-slate-400">{{ $race->entries->count() }} drivers</span>
                                     @if ($isLive)
                                         <span class="rounded bg-red-600 px-2 py-0.5 text-xs font-bold text-white">LIVE</span>
                                     @endif
@@ -506,6 +669,11 @@ new #[Title('Races & Lineups')] class extends Component
                                 <p class="mt-0.5 truncate text-xs text-slate-500">
                                     {{ collect([$race->laps ? $race->laps.' Laps' : 'No laps set', $race->transfers, $race->sponsor ? 'Sponsor: '.$race->sponsor : null])->filter()->implode(' · ') }}
                                 </p>
+                                @if ($raceCars->isNotEmpty())
+                                    <p class="mt-0.5 truncate text-[11px] font-semibold text-amber-700" title="Cars this race draws from the pool">
+                                        Cars {{ $raceCars->pluck('number')->implode(', ') }}
+                                    </p>
+                                @endif
                             </div>
 
                             <div
@@ -528,6 +696,9 @@ new #[Title('Races & Lineups')] class extends Component
                                         <span class="w-4 shrink-0 text-right text-xs font-bold text-slate-400">{{ $entry->start_position }}</span>
                                         <span class="w-9 shrink-0 rounded bg-slate-900 py-0.5 text-center text-xs font-black text-white">{{ filled($entry->competitor->car_number) ? $entry->competitor->car_number : '—' }}</span>
                                         <span class="min-w-0 flex-1 truncate">{{ $entry->competitor->full_name }}</span>
+                                        @if ($entry->car)
+                                            <span title="Assigned invitational car" class="shrink-0 rounded bg-amber-400 px-1 py-0.5 font-mono text-[10px] font-black text-slate-900">{{ $entry->car->number }}</span>
+                                        @endif
                                         <button
                                             type="button"
                                             wire:sort:ignore

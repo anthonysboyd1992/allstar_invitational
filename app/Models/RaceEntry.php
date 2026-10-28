@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['race_id', 'competitor_id', 'start_position'])]
+#[Fillable(['race_id', 'competitor_id', 'car_id', 'start_position'])]
 class RaceEntry extends Model
 {
     /**
@@ -23,6 +23,14 @@ class RaceEntry extends Model
     public function competitor(): BelongsTo
     {
         return $this->belongsTo(Competitor::class);
+    }
+
+    /**
+     * @return BelongsTo<Car, $this>
+     */
+    public function car(): BelongsTo
+    {
+        return $this->belongsTo(Car::class);
     }
 
     /**

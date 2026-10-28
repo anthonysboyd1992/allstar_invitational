@@ -306,6 +306,7 @@ class VmixDataTest extends TestCase
             'ringer_1_hometown' => 'Elida, OH',
             'ringer_1_accolades' => 'Champ',
             'ringer_1_headshot' => app(VmixFeed::class)->headshotFor($driver),
+            'ringer_1_assigned_car' => '',
         ], $row);
 
         $component->set("fieldValues.{$field->id}", (string) $other->id);
