@@ -32,17 +32,18 @@
             .race-title { padding: 6px 8px; background: var(--heading); color: #fff; font-size: 12px; letter-spacing: 0.04em; text-align: center; text-transform: uppercase; }
             .race-block + .race-block .race-title { border-top: 14px solid #fff; }
             th, td { padding: 3px 6px; text-align: left; vertical-align: top; }
-            th { background: var(--heading); color: #fff; font-size: 9px; letter-spacing: 0.04em; text-transform: uppercase; }
-            th, .race-title {
+            .cols th { background: #111; color: #fff; font-size: 9px; letter-spacing: 0.04em; text-transform: uppercase; }
+            th, .race-title, .cols th {
                 -webkit-print-color-adjust: exact;
                 print-color-adjust: exact;
             }
             td { border-bottom: 1px solid #d1d5db; }
-            .pos, .car, .driver, .weight, .kart { white-space: nowrap; width: 1%; }
+            .pos, .car, .driver, .pill, .weight, .kart { white-space: nowrap; width: 1%; }
             .pos, .car { font-weight: 700; }
             .hometown { width: 18%; }
             .accolades { width: 42%; }
-            .kart { font-weight: 700; text-align: center; }
+            .pill, .weight, .kart { text-align: center; }
+            .kart { font-weight: 700; }
             .empty { padding: 10px 6px; color: #64748b; }
             @page { size: letter landscape; margin: 0.5in; }
             @media print {
@@ -50,8 +51,14 @@
                 .toolbar { display: none; }
                 .sheet { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; }
                 .sheet-pages > thead { display: table-header-group; }
-                th, .race-title {
+                .race-title {
                     background: var(--heading) !important;
+                    color: #fff !important;
+                    -webkit-print-color-adjust: exact;
+                    print-color-adjust: exact;
+                }
+                .cols th {
+                    background: #111 !important;
                     color: #fff !important;
                     -webkit-print-color-adjust: exact;
                     print-color-adjust: exact;
@@ -77,33 +84,41 @@
                         </td>
                     </tr>
                 </thead>
-                @forelse ($races as $race)
+                @forelse ($blocks as $block)
+                    @php($showPill = $block['show_pill'])
                     <tbody class="race-block">
                         <tr class="race-start">
-                            <th class="race-title" colspan="7">{{ $race->printedTitle() }}</th>
+                            <th class="race-title" colspan="{{ $block['columns'] }}">{{ $block['title'] }}</th>
                         </tr>
-                        <tr>
+                        <tr class="cols">
                             <th class="pos">Pos</th>
                             <th class="car">Car</th>
                             <th class="driver">Driver</th>
                             <th class="hometown">Hometown</th>
                             <th class="accolades">Accolades</th>
+                            @if ($showPill)
+                                <th class="pill">Pill</th>
+                            @endif
                             <th class="weight">Weight</th>
                             <th class="kart">Kart Assignment</th>
                         </tr>
-                        @forelse ($race->entries as $entry)
+                        @forelse ($block['slots'] as $slot)
+                            @php($entry = $slot['entry'])
                             <tr>
-                                <td class="pos">{{ $entry->start_position }}</td>
-                                <td class="car">{{ $entry->competitor?->car_number }}</td>
-                                <td class="driver">{{ $entry->competitor?->full_name }}</td>
-                                <td class="hometown">{{ $entry->competitor?->hometown }}</td>
-                                <td class="accolades">{{ $entry->competitor?->accolades }}</td>
-                                <td class="weight">{{ $entry->competitor?->formattedWeight() }}</td>
-                                <td class="kart">{{ $race->kartAssignment($entry) }}</td>
+                                <td class="pos">{{ $slot['position'] }}</td>
+                                <td class="car">{{ $entry?->competitor?->car_number }}</td>
+                                <td class="driver">{{ $entry?->competitor?->full_name }}</td>
+                                <td class="hometown">{{ $entry?->competitor?->hometown }}</td>
+                                <td class="accolades">{{ $entry?->competitor?->accolades }}</td>
+                                @if ($showPill)
+                                    <td class="pill">{{ $entry?->competitor?->pill_number }}</td>
+                                @endif
+                                <td class="weight">{{ $entry?->competitor?->formattedWeight() }}</td>
+                                <td class="kart">{{ $entry ? $block['race']->kartAssignment($entry) : '' }}</td>
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="7" class="empty">No drivers in this race.</td>
+                                <td colspan="{{ $block['columns'] }}" class="empty">No drivers in this race.</td>
                             </tr>
                         @endforelse
                     </tbody>

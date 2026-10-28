@@ -26,8 +26,11 @@ class LineupPrintController extends Controller
                 ->get()
         );
 
+        $blocks = $races->flatMap->printedLineupBlocks()->values();
+
         return view('lineups-print', [
             'races' => $races,
+            'blocks' => $blocks,
             'title' => $races->count() === 1 ? $races->first()->printedTitle() : 'Lineups',
             'leftLogoUrl' => Setting::letterheadUrl('left'),
             'rightLogoUrl' => Setting::letterheadUrl('right'),

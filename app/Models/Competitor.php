@@ -96,6 +96,22 @@ class Competitor extends Model
     }
 
     /**
+     * Lowest pill first, then last name, with no pill last.
+     *
+     * @template TCollection of \Illuminate\Support\Collection<int, Competitor>
+     *
+     * @param  TCollection  $competitors
+     * @return TCollection
+     */
+    public static function sortByPillNumber(Collection $competitors): Collection
+    {
+        return $competitors->sort(fn (Competitor $a, Competitor $b): int => (blank($a->pill_number) <=> blank($b->pill_number))
+            ?: ((int) $a->pill_number <=> (int) $b->pill_number)
+            ?: strcasecmp((string) $a->last_name, (string) $b->last_name)
+            ?: strcasecmp((string) $a->first_name, (string) $b->first_name))->values();
+    }
+
+    /**
      * @return HasMany<RaceEntry, $this>
      */
     public function entries(): HasMany

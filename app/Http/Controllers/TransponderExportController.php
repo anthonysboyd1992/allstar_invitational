@@ -2,7 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Competitor;
 use App\Models\Race;
+use App\Models\RaceType;
+use Illuminate\Support\Collection;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class TransponderExportController extends Controller
@@ -18,6 +21,38 @@ class TransponderExportController extends Controller
             ->pluck('competitor')
             ->filter(fn ($competitor): bool => filled($competitor?->transponder));
 
+        return $this->csvDownload($competitors, $race->name);
+    }
+
+    /**
+     * Download the race settings file that accompanies the transponder CSV.
+     */
+    public function laps(Race $race): StreamedResponse
+    {
+        return $this->lapsDownload($race->laps ?? 0, $race->name);
+    }
+
+    /**
+     * One CSV for every group in the type, in program order.
+     */
+    public function typeTransponders(RaceType $raceType): StreamedResponse
+    {
+        return $this->csvDownload($raceType->transponderLineup(), $raceType->name);
+    }
+
+    /**
+     * One laps file for a type that shares a timing session.
+     */
+    public function typeLaps(RaceType $raceType): StreamedResponse
+    {
+        return $this->lapsDownload($raceType->sessionLaps() ?? 0, $raceType->name);
+    }
+
+    /**
+     * @param  Collection<int, Competitor|null>  $competitors
+     */
+    private function csvDownload(Collection $competitors, string $baseName): StreamedResponse
+    {
         return response()->streamDownload(function () use ($competitors): void {
             $output = fopen('php://output', 'w');
 
@@ -35,23 +70,20 @@ class TransponderExportController extends Controller
             }
 
             fclose($output);
-        }, $this->fileName($race, 'csv'), ['Content-Type' => 'text/csv; charset=UTF-8']);
+        }, $this->fileName($baseName, 'csv'), ['Content-Type' => 'text/csv; charset=UTF-8']);
     }
 
-    /**
-     * Download the race settings file that accompanies the transponder CSV.
-     */
-    public function laps(Race $race): StreamedResponse
+    private function lapsDownload(int $laps, string $baseName): StreamedResponse
     {
-        return response()->streamDownload(function () use ($race): void {
-            echo 'Laps='.($race->laps ?? 0)."\r\n";
-        }, $this->fileName($race, 'dat'), ['Content-Type' => 'text/plain; charset=UTF-8']);
+        return response()->streamDownload(function () use ($laps): void {
+            echo 'Laps='.$laps."\r\n";
+        }, $this->fileName($baseName, 'dat'), ['Content-Type' => 'text/plain; charset=UTF-8']);
     }
 
-    private function fileName(Race $race, string $extension): string
+    private function fileName(string $name, string $extension): string
     {
-        $name = trim(preg_replace('/[\\\\\/:*?"<>|]+/', '-', $race->name));
+        $name = trim(preg_replace('/[\\\\\/:*?"<>|]+/', '-', $name));
 
-        return ($name === '' ? 'Race '.$race->id : $name).'.'.$extension;
+        return ($name === '' ? 'Race' : $name).'.'.$extension;
     }
 }

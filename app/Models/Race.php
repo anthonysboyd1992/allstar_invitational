@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
-#[Fillable(['race_type_id', 'name', 'laps', 'transfers', 'sponsor', 'sort_order'])]
+#[Fillable(['race_type_id', 'name', 'laps', 'transfers', 'sponsor', 'starting_positions', 'sort_order'])]
 class Race extends Model
 {
     /** @use HasFactory<RaceFactory> */
@@ -65,6 +65,135 @@ class Race extends Model
         $this->assignCarsByWeight();
     }
 
+    public function hasFixedField(): bool
+    {
+        return (int) $this->starting_positions > 0;
+    }
+
+    /**
+     * How many starting spots to draw. A configured field can grow if a driver is already past that number.
+     */
+    public function slotCount(): int
+    {
+        $this->loadMissing('entries');
+        $occupied = (int) $this->entries->max('start_position');
+
+        if ($this->hasFixedField()) {
+            return max((int) $this->starting_positions, $occupied);
+        }
+
+        return $this->entries->count();
+    }
+
+    /**
+     * Lowest empty starting spot, or null when the field is full.
+     */
+    public function firstOpenSlot(): ?int
+    {
+        if (! $this->hasFixedField()) {
+            return null;
+        }
+
+        $this->loadMissing('entries');
+        $taken = $this->entries->pluck('start_position')->all();
+
+        foreach (range(1, (int) $this->starting_positions) as $slot) {
+            if (! in_array($slot, $taken, true)) {
+                return $slot;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Grid of starting spots. Empty spots stay empty until a driver is placed there.
+     *
+     * @return Collection<int, array{position: int, entry: ?RaceEntry}>
+     */
+    public function lineupSlots(): Collection
+    {
+        $this->loadMissing(['entries.competitor', 'entries.car']);
+
+        if (! $this->hasFixedField()) {
+            return $this->entries->values()->map(fn (RaceEntry $entry): array => [
+                'position' => $entry->start_position,
+                'entry' => $entry,
+            ]);
+        }
+
+        $byPosition = $this->entries->keyBy('start_position');
+
+        return collect(range(1, $this->slotCount()))
+            ->map(fn (int $position): array => [
+                'position' => $position,
+                'entry' => $byPosition->get($position),
+            ]);
+    }
+
+    /**
+     * Put a driver in a specific starting spot. Occupied spots swap when the driver is already in this race.
+     */
+    public function placeInSlot(int $competitorId, int $slot): void
+    {
+        $this->loadMissing('entries');
+        $max = $this->hasFixedField() ? $this->slotCount() : $slot;
+        $slot = max(1, min($slot, $max));
+
+        DB::transaction(function () use ($competitorId, $slot): void {
+            $this->load('entries');
+            $occupant = $this->entries->firstWhere('start_position', $slot);
+            $moving = $this->entries->firstWhere('competitor_id', $competitorId);
+
+            if ($moving && $occupant && $moving->id === $occupant->id) {
+                return;
+            }
+
+            if ($occupant && ! $moving) {
+                return;
+            }
+
+            if ($moving && $occupant) {
+                $previous = $moving->start_position;
+                $occupant->update(['start_position' => 10000 + $previous]);
+                $moving->update(['start_position' => $slot]);
+                $occupant->update(['start_position' => $previous]);
+
+                return;
+            }
+
+            if ($moving) {
+                $moving->update(['start_position' => $slot]);
+
+                return;
+            }
+
+            $this->entries()->create([
+                'competitor_id' => $competitorId,
+                'start_position' => $slot,
+            ]);
+        });
+
+        $this->unsetRelation('entries');
+        $this->assignCarsByWeight();
+    }
+
+    /**
+     * Take a driver off this race. Fixed fields keep the hole; packed lineups close the gap.
+     */
+    public function removeCompetitor(int $competitorId): void
+    {
+        if ($this->hasFixedField()) {
+            $this->entries()->where('competitor_id', $competitorId)->delete();
+            $this->unsetRelation('entries');
+            $this->assignCarsByWeight();
+
+            return;
+        }
+
+        $this->syncLineup(array_values(array_diff($this->lineupIds(), [$competitorId])));
+    }
+
     /**
      * Cars this race draws from its type's pool.
      *
@@ -110,14 +239,52 @@ class Race extends Model
     }
 
     /**
+     * 1-based place of this race in its type's program order.
+     */
+    public function groupNumber(): int
+    {
+        $this->loadMissing(['raceType.races']);
+        $index = $this->raceType->racesInProgramOrder()->search(fn (Race $race): bool => $race->id === $this->id);
+
+        return ($index === false ? 0 : $index) + 1;
+    }
+
+    /**
+     * Heat-sheet heading: the race name, uppercase.
+     */
+    public function printedRaceName(): string
+    {
+        return strtoupper(trim($this->name));
+    }
+
+    /**
      * Sponsor, then race name, the way it prints on a heat sheet (e.g. "ACME - HEAT 1").
      */
     public function printedTitle(): string
     {
-        $name = strtoupper(trim($this->name));
+        $name = $this->printedRaceName();
         $sponsor = strtoupper(trim((string) $this->sponsor));
 
         return $sponsor !== '' ? $sponsor.' - '.$name : $name;
+    }
+
+    /**
+     * Printable tables for this race. Each race prints as its own group, including empty starting spots.
+     *
+     * @return Collection<int, array{title: string, slots: Collection<int, array{position: int, entry: ?RaceEntry}>, race: Race, show_pill: bool, columns: int}>
+     */
+    public function printedLineupBlocks(): Collection
+    {
+        $this->loadMissing(['entries.competitor', 'entries.car', 'raceType']);
+        $showPill = (bool) $this->raceType->assigns_by_pill;
+
+        return collect([[
+            'title' => $this->printedTitle(),
+            'slots' => $this->lineupSlots(),
+            'race' => $this,
+            'show_pill' => $showPill,
+            'columns' => $showPill ? 8 : 7,
+        ]]);
     }
 
     /**
@@ -135,16 +302,7 @@ class Race extends Model
     {
         $this->loadMissing(['entries.competitor', 'raceType.cars', 'raceType.races']);
 
-        $cars = Car::sortFastestFirst($this->raceType->carsForRace($this));
-        $entries = $this->entriesByWeight();
-
-        foreach ($entries as $index => $entry) {
-            $carId = $cars->get($index)?->id;
-
-            if ($entry->car_id !== $carId) {
-                $entry->update(['car_id' => $carId]);
-            }
-        }
+        $this->pairEntriesWithCars($this->entriesByWeight(), Car::sortFastestFirst($this->raceType->carsForRace($this)));
     }
 
     /**
@@ -169,6 +327,21 @@ class Race extends Model
     }
 
     /**
+     * @param  Collection<int, RaceEntry>  $entries
+     * @param  Collection<int, Car>  $cars
+     */
+    private function pairEntriesWithCars(Collection $entries, Collection $cars): void
+    {
+        foreach ($entries as $index => $entry) {
+            $carId = $cars->get($index)?->id;
+
+            if ($entry->car_id !== $carId) {
+                $entry->update(['car_id' => $carId]);
+            }
+        }
+    }
+
+    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>
@@ -177,6 +350,7 @@ class Race extends Model
     {
         return [
             'laps' => 'integer',
+            'starting_positions' => 'integer',
             'sort_order' => 'integer',
         ];
     }

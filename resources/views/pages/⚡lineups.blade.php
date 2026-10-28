@@ -26,7 +26,14 @@ new #[Title('Races & Lineups')] class extends Component
 
     public ?int $newTypeCarsAllowed = null;
 
+    public bool $newTypeShowsPill = false;
+
     public ?int $editingRaceId = null;
+
+    public ?int $editingRaceTypeId = null;
+
+    /** @var array{name?: string, shows_pill?: bool} */
+    public array $typeForm = [];
 
     /** @var array<string, string|null> */
     public array $raceForm = [];
@@ -122,6 +129,7 @@ new #[Title('Races & Lineups')] class extends Component
             'sort_order' => (int) RaceType::query()->max('sort_order') + 1,
             'cars_per_race' => $this->newTypeCarsPerRace,
             'cars_allowed' => $this->newTypeCarsAllowed,
+            'assigns_by_pill' => $this->newTypeShowsPill,
         ]);
 
         for ($number = 1; $number <= $this->newTypeRaceCount; $number++) {
@@ -131,7 +139,7 @@ new #[Title('Races & Lineups')] class extends Component
             ]);
         }
 
-        $this->reset('newTypeName', 'newTypeRaceCount', 'newTypeCarsPerRace', 'newTypeCarsAllowed');
+        $this->reset('newTypeName', 'newTypeRaceCount', 'newTypeCarsPerRace', 'newTypeCarsAllowed', 'newTypeShowsPill');
         $this->dispatch('notify', message: "Added {$name}.");
     }
 
@@ -214,29 +222,6 @@ new #[Title('Races & Lineups')] class extends Component
         $this->version++;
     }
 
-    public function sortPoolByTime(int $raceTypeId): void
-    {
-        $raceType = RaceType::query()->findOrFail($raceTypeId);
-        $raceType->sortPoolByTime();
-        $raceType->assignCarsByWeight();
-        $this->version++;
-    }
-
-    public function dealPool(int $raceTypeId): void
-    {
-        $raceType = RaceType::query()->findOrFail($raceTypeId);
-
-        if (! $raceType->dealIntoGroups()) {
-            $this->dispatch('notify', message: 'Turn Alternate on so the pool can split, then deal.', type: 'error');
-
-            return;
-        }
-
-        $raceType->assignCarsByWeight();
-        $this->version++;
-        $this->dispatch('notify', message: 'Dealt cars into groups (1st to group 1, 2nd to group 2, and so on).');
-    }
-
     /**
      * Drag-and-drop handler for a type's car pool. Position 0 is first in the rotation.
      */
@@ -257,10 +242,31 @@ new #[Title('Races & Lineups')] class extends Component
         $this->version++;
     }
 
-    public function assignCarsByWeight(int $raceTypeId): void
+    public function assignByPillDraw(int $raceTypeId): void
     {
-        RaceType::query()->findOrFail($raceTypeId)->assignCarsByWeight();
-        $this->dispatch('notify', message: 'Assigned cars by weight (heaviest to fastest).');
+        $raceType = RaceType::query()->findOrFail($raceTypeId);
+        $groups = $raceType->assignByPillDraw();
+        $this->version++;
+
+        if ($groups === -1) {
+            $this->dispatch('notify', message: 'Add races to this type before assigning by pill.', type: 'error');
+
+            return;
+        }
+
+        if ($groups === 0) {
+            $this->dispatch('notify', message: 'Add competitors before assigning by pill.', type: 'error');
+
+            return;
+        }
+
+        $this->dispatch('notify', message: "Assigned drivers by pill across {$groups} groups.");
+    }
+
+    public function toggleCombineGroups(int $raceTypeId): void
+    {
+        $raceType = RaceType::query()->findOrFail($raceTypeId);
+        $raceType->update(['combines_groups' => ! $raceType->combines_groups]);
     }
 
     public function renameRaceType(int $raceTypeId, string $name): void
@@ -270,6 +276,47 @@ new #[Title('Races & Lineups')] class extends Component
         }
 
         RaceType::query()->whereKey($raceTypeId)->update(['name' => trim($name)]);
+    }
+
+    public function openRaceTypeEditor(int $raceTypeId): void
+    {
+        $raceType = RaceType::query()->findOrFail($raceTypeId);
+
+        $this->resetValidation();
+        $this->editingRaceTypeId = $raceType->id;
+        $this->typeForm = [
+            'name' => $raceType->name,
+            'shows_pill' => $raceType->assigns_by_pill,
+        ];
+    }
+
+    public function closeRaceTypeEditor(): void
+    {
+        $this->editingRaceTypeId = null;
+        $this->typeForm = [];
+        $this->resetValidation();
+    }
+
+    public function saveRaceType(): void
+    {
+        $raceType = RaceType::query()->findOrFail($this->editingRaceTypeId);
+        $this->typeForm['name'] = trim((string) ($this->typeForm['name'] ?? ''));
+
+        $data = $this->validate([
+            'typeForm.name' => ['required', 'string', 'max:100'],
+            'typeForm.shows_pill' => ['nullable', 'boolean'],
+        ], attributes: [
+            'typeForm.name' => 'race type name',
+            'typeForm.shows_pill' => 'show pill',
+        ])['typeForm'];
+
+        $raceType->update([
+            'name' => $data['name'],
+            'assigns_by_pill' => (bool) ($data['shows_pill'] ?? false),
+        ]);
+
+        $this->closeRaceTypeEditor();
+        $this->dispatch('notify', message: "Saved {$raceType->name}.");
     }
 
     public function deleteRaceType(int $raceTypeId): void
@@ -304,6 +351,7 @@ new #[Title('Races & Lineups')] class extends Component
             'laps' => (string) $race->laps,
             'transfers' => (string) $race->transfers,
             'sponsor' => (string) $race->sponsor,
+            'starting_positions' => (string) $race->starting_positions,
         ];
     }
 
@@ -326,17 +374,24 @@ new #[Title('Races & Lineups')] class extends Component
             'raceForm.laps' => ['nullable', 'integer', 'min:0', 'max:999'],
             'raceForm.transfers' => ['nullable', 'string', 'max:150'],
             'raceForm.sponsor' => ['nullable', 'string', 'max:150'],
+            'raceForm.starting_positions' => ['nullable', 'integer', 'min:1', 'max:50'],
         ], attributes: [
             'raceForm.name' => 'race name',
             'raceForm.race_type_id' => 'race type',
             'raceForm.laps' => 'laps',
             'raceForm.transfers' => 'transfer text',
             'raceForm.sponsor' => 'sponsor',
+            'raceForm.starting_positions' => 'starting positions',
         ])['raceForm'];
 
         $race->update(array_map(fn ($value) => $value === '' ? null : $value, $data));
         $race->unsetRelation('raceType');
-        $race->assignCarsByWeight();
+
+        if (! $race->hasFixedField()) {
+            $race->syncLineup($race->lineupIds());
+        } else {
+            $race->assignCarsByWeight();
+        }
 
         $this->closeRaceEditor();
         $this->dispatch('notify', message: "Saved {$race->name}.");
@@ -351,11 +406,51 @@ new #[Title('Races & Lineups')] class extends Component
         }
     }
 
+    public function updateStartingPositions(int $raceId, mixed $value): void
+    {
+        $value = is_string($value) ? trim($value) : $value;
+        $value = $value === '' ? null : $value;
+
+        $validator = Validator::make(
+            ['starting_positions' => $value],
+            ['starting_positions' => ['nullable', 'integer', 'min:1', 'max:50']],
+            [],
+            ['starting_positions' => 'starting positions'],
+        );
+
+        if ($validator->fails()) {
+            $this->dispatch('notify', message: $validator->errors()->first(), type: 'error');
+
+            return;
+        }
+
+        $race = Race::query()->findOrFail($raceId);
+        $race->update(['starting_positions' => $validator->validated()['starting_positions']]);
+
+        if (! $race->hasFixedField()) {
+            $race->syncLineup($race->lineupIds());
+        }
+
+        $this->version++;
+    }
+
     /**
      * Handle a drop from wire:sort. Roster items are keyed "c{competitorId}", lineup items "e{entryId}".
+     * Fixed-field races pass group-id as "{raceId}_{slot}".
      */
     public function placeDriver(string $item, int $position, int|string|null $raceId = null): void
     {
+        if (str_starts_with($item, 's')) {
+            return;
+        }
+
+        if (is_string($raceId) && str_contains($raceId, '_')) {
+            [$id, $slot] = array_map('intval', explode('_', $raceId, 2));
+            $this->placeOnSlot($item, $id, $slot);
+
+            return;
+        }
+
         $target = Race::query()->findOrFail((int) $raceId);
         $source = null;
 
@@ -382,15 +477,55 @@ new #[Title('Races & Lineups')] class extends Component
         array_splice($lineup, max(0, min($position, count($lineup))), 0, [$competitorId]);
         $target->syncLineup($lineup);
 
-        $source?->syncLineup(array_values(array_diff($source->lineupIds(), [$competitorId])));
+        $source?->removeCompetitor($competitorId);
 
+        $this->version++;
+    }
+
+    private function placeOnSlot(string $item, int $raceId, int $slot): void
+    {
+        $target = Race::query()->findOrFail($raceId);
+        $source = null;
+
+        if (str_starts_with($item, 'e')) {
+            $entry = RaceEntry::query()->findOrFail((int) substr($item, 1));
+            $competitorId = $entry->competitor_id;
+            $source = $entry->race_id === $target->id ? null : $entry->race;
+        } else {
+            $competitorId = Competitor::query()->findOrFail((int) substr($item, 1))->id;
+        }
+
+        $alreadyInTarget = in_array($competitorId, $target->lineupIds(), true);
+        $isReorder = str_starts_with($item, 'e') && $source === null;
+
+        if ($alreadyInTarget && ! $isReorder) {
+            $this->version++;
+            $this->dispatch('notify', message: 'That driver is already in '.$target->name.'.', type: 'error');
+
+            return;
+        }
+
+        if (! $target->hasFixedField() || $slot < 1 || $slot > $target->slotCount()) {
+            return;
+        }
+
+        $occupant = $target->entries->firstWhere('start_position', $slot);
+
+        if ($occupant && $occupant->competitor_id !== $competitorId && ! $isReorder) {
+            $this->version++;
+            $this->dispatch('notify', message: 'Starting spot '.$slot.' is already taken.', type: 'error');
+
+            return;
+        }
+
+        $target->placeInSlot($competitorId, $slot);
+        $source?->removeCompetitor($competitorId);
         $this->version++;
     }
 
     public function removeFromRace(int $raceId, int $competitorId): void
     {
-        $race = Race::query()->findOrFail($raceId);
-        $race->syncLineup(array_values(array_diff($race->lineupIds(), [$competitorId])));
+        Race::query()->findOrFail($raceId)->removeCompetitor($competitorId);
         $this->version++;
     }
 
@@ -400,22 +535,12 @@ new #[Title('Races & Lineups')] class extends Component
         $this->version++;
     }
 
-    public function goLive(int $raceId): void
-    {
-        if ($this->activeRaceId === $raceId) {
-            return;
-        }
-
-        Setting::put(Setting::ActiveRace, (string) Race::query()->findOrFail($raceId)->id);
-        unset($this->activeRaceId);
-    }
-
     public function addToLiveRace(int $competitorId): void
     {
         $race = $this->activeRaceId ? Race::query()->find($this->activeRaceId) : null;
 
         if (! $race) {
-            $this->dispatch('notify', message: 'Click a race first to make it live.', type: 'error');
+            $this->dispatch('notify', message: 'Pick a live race on the vMix page first.', type: 'error');
 
             return;
         }
@@ -428,7 +553,20 @@ new #[Title('Races & Lineups')] class extends Component
             return;
         }
 
-        $race->syncLineup([...$lineup, Competitor::query()->findOrFail($competitorId)->id]);
+        if ($race->hasFixedField()) {
+            $slot = $race->firstOpenSlot();
+
+            if ($slot === null) {
+                $this->dispatch('notify', message: $race->name.' already has '.$race->starting_positions.' starters.', type: 'error');
+
+                return;
+            }
+
+            $race->placeInSlot(Competitor::query()->findOrFail($competitorId)->id, $slot);
+        } else {
+            $race->syncLineup([...$lineup, Competitor::query()->findOrFail($competitorId)->id]);
+        }
+
         $this->version++;
     }
 
@@ -627,6 +765,12 @@ new #[Title('Races & Lineups')] class extends Component
                         @error('raceForm.transfers') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
                     </label>
 
+                    <label class="block">
+                        <span class="text-xs font-semibold text-slate-500">Starting positions</span>
+                        <input type="number" min="1" max="50" wire:model="raceForm.starting_positions" placeholder="e.g. 10" class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-2 text-sm focus:border-amber-500 focus:outline-none">
+                        @error('raceForm.starting_positions') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
+                    </label>
+
                     <label class="col-span-2 block">
                         <span class="text-xs font-semibold text-slate-500">Sponsor</span>
                         <input wire:model="raceForm.sponsor" placeholder="Put sponsor here" class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-2 text-sm focus:border-amber-500 focus:outline-none">
@@ -634,11 +778,51 @@ new #[Title('Races & Lineups')] class extends Component
                     </label>
                 </div>
 
-                <p class="mt-3 text-xs text-slate-400">Laps and transfer text feed the vMix lineup ("Trans_Dist.Text") and the timing .dat file.</p>
+                <p class="mt-3 text-xs text-slate-400">Starting positions keep empty spots open, so you can fill 6–10 before 1–5. Leave blank to pack from 1 as you add. Laps and transfer text feed vMix and the timing .dat file.</p>
 
                 <div class="mt-5 flex justify-end gap-2">
                     <button type="button" wire:click="closeRaceEditor" class="rounded-md px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">Cancel</button>
                     <button type="submit" class="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">Save race</button>
+                </div>
+            </form>
+        </div>
+    @endif
+
+    @if ($editingRaceTypeId)
+        <div
+            class="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-slate-900/60 p-4 pt-20"
+            x-on:keydown.escape.window="$wire.closeRaceTypeEditor()"
+            wire:click.self="closeRaceTypeEditor"
+        >
+            <form
+                wire:submit="saveRaceType"
+                x-init="$nextTick(() => $el.querySelector('input')?.select())"
+                class="w-full max-w-lg rounded-xl bg-white p-5 shadow-2xl"
+            >
+                <div class="mb-4 flex items-center justify-between">
+                    <h2 class="text-lg font-black uppercase">Edit race type</h2>
+                    <button type="button" wire:click="closeRaceTypeEditor" class="rounded px-2 text-2xl leading-none text-slate-400 hover:text-slate-900">&times;</button>
+                </div>
+
+                <div class="space-y-3">
+                    <label class="block">
+                        <span class="text-xs font-semibold text-slate-500">Name</span>
+                        <input wire:model="typeForm.name" class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-2 text-sm focus:border-amber-500 focus:outline-none">
+                        @error('typeForm.name') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
+                    </label>
+
+                    <label class="flex items-start gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm">
+                        <input type="checkbox" wire:model="typeForm.shows_pill" class="mt-0.5 size-4">
+                        <span>
+                            <span class="font-semibold text-slate-800">Show pill</span>
+                            <span class="mt-0.5 block text-xs text-slate-500">Print and lineup cards include each driver’s pill number. Turn this on for Hotlaps and heats.</span>
+                        </span>
+                    </label>
+                </div>
+
+                <div class="mt-5 flex justify-end gap-2">
+                    <button type="button" wire:click="closeRaceTypeEditor" class="rounded-md px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">Cancel</button>
+                    <button type="submit" class="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">Save type</button>
                 </div>
             </form>
         </div>
@@ -652,7 +836,7 @@ new #[Title('Races & Lineups')] class extends Component
                 @if ($this->liveRace)
                     Click to add to <span class="font-bold text-red-600">{{ $this->liveRace->name }}</span>, or drag onto any race.
                 @else
-                    Click a race to make it live, then click drivers to add them. You can also drag.
+                    Pick a live race on the vMix page, then click drivers to add them. You can also drag.
                 @endif
             </p>
             <input
@@ -732,6 +916,10 @@ new #[Title('Races & Lineups')] class extends Component
                     <span class="text-xs font-semibold text-slate-500">Group size</span>
                     <input type="number" min="1" max="50" wire:model="newTypeCarsPerRace" placeholder="all" class="mt-0.5 block w-20 rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
                 </label>
+                <label class="flex items-center gap-1.5 pb-1 text-xs font-semibold text-slate-600" title="Print and lineup cards include each driver’s pill number.">
+                    <input type="checkbox" wire:model="newTypeShowsPill" class="size-4">
+                    Show pill
+                </label>
                 <button type="submit" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-700">Add type</button>
             </form>
             @if ($this->raceTypes->isNotEmpty())
@@ -764,6 +952,7 @@ new #[Title('Races & Lineups')] class extends Component
                         wire:change="renameRaceType({{ $raceType->id }}, $event.target.value)"
                         class="rounded-md border border-transparent bg-transparent px-1 text-lg font-black uppercase hover:border-slate-300 focus:border-amber-500 focus:bg-white focus:outline-none"
                     >
+                    <button type="button" wire:click="openRaceTypeEditor({{ $raceType->id }})" class="rounded-md bg-white px-2.5 py-1 text-xs font-bold ring-1 ring-slate-300 hover:bg-slate-50">Edit</button>
                     <button type="button" wire:click="addRace({{ $raceType->id }})" class="rounded-md bg-white px-2.5 py-1 text-xs font-bold ring-1 ring-slate-300 hover:bg-slate-50">+ Race</button>
                     <button type="button" wire:click="openPrintPicker({{ $raceType->id }})" class="rounded-md bg-white px-2.5 py-1 text-xs font-bold ring-1 ring-slate-300 hover:bg-slate-50">Print</button>
                     <button
@@ -809,10 +998,20 @@ new #[Title('Races & Lineups')] class extends Component
                     </label>
                     <button
                         type="button"
-                        wire:click="assignCarsByWeight({{ $raceType->id }})"
-                        @disabled($raceType->cars->isEmpty())
-                        class="rounded-md bg-amber-400 px-2.5 py-1 text-xs font-black text-slate-900 hover:bg-amber-300 disabled:opacity-40"
-                    >Assign by weight</button>
+                        wire:click="assignByPillDraw({{ $raceType->id }})"
+                        title="Lowest pill to the first race, next pill to the next race, wrapping through every group."
+                        class="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-black text-white hover:bg-slate-800"
+                    >Assign by pill</button>
+                    <button
+                        type="button"
+                        wire:click="toggleCombineGroups({{ $raceType->id }})"
+                        title="Timing uses one transponder file for every group. Print stays one sheet per group."
+                        @class([
+                            'rounded-md px-2.5 py-1 text-xs font-bold',
+                            'bg-amber-400 text-slate-900' => $raceType->combines_groups,
+                            'bg-slate-100 text-slate-600 ring-1 ring-slate-300 hover:bg-slate-200' => ! $raceType->combines_groups,
+                        ])
+                    >One file</button>
                 </div>
 
                 @php($poolFull = $raceType->poolIsFull())
@@ -822,7 +1021,7 @@ new #[Title('Races & Lineups')] class extends Component
                         <span class="rounded bg-white/10 px-1 font-mono text-[10px] font-bold text-white">
                             {{ $raceType->cars->count() }}@if ($raceType->cars_allowed)/{{ $raceType->cars_allowed }}@endif
                         </span>
-                        @forelse ($raceType->carGroups() as $groupIndex => $group)
+                        @foreach ($raceType->carGroups() as $groupIndex => $group)
                             @if ($raceType->rotatesPool())
                                 <span wire:key="pool-label-{{ $raceType->id }}-{{ $groupIndex }}" @class(['ml-1 text-[10px] font-black uppercase', 'text-amber-400' => $groupIndex % 2 === 0, 'text-white' => $groupIndex % 2 === 1])>G{{ $groupIndex + 1 }}</span>
                             @endif
@@ -844,22 +1043,10 @@ new #[Title('Races & Lineups')] class extends Component
                                     >&times;</button>
                                 </span>
                             @endforeach
-                        @empty
+                        @endforeach
+                        @if ($raceType->cars->isEmpty())
                             <p class="text-[11px] text-slate-400">Click a car below to add it to {{ $raceType->name }}.</p>
-                        @endforelse
-                        <button
-                            type="button"
-                            wire:click="dealPool({{ $raceType->id }})"
-                            @disabled($raceType->cars->count() < 2 || ! $raceType->rotatesPool())
-                            title="1st car to group 1, 2nd to group 2, and so on, so each race gets a mix of fast and slow."
-                            class="ml-auto rounded px-1.5 py-0.5 text-[10px] font-bold text-slate-300 hover:bg-white/10 disabled:opacity-30"
-                        >Deal groups</button>
-                        <button
-                            type="button"
-                            wire:click="sortPoolByTime({{ $raceType->id }})"
-                            @disabled($raceType->cars->isEmpty())
-                            class="rounded px-1.5 py-0.5 text-[10px] font-bold text-slate-300 hover:bg-white/10 disabled:opacity-30"
-                        >Fastest first</button>
+                        @endif
                     </div>
                     <div class="flex flex-wrap items-center gap-1 border-t border-dashed border-slate-300 bg-slate-50 px-2 py-1">
                         <span class="text-[10px] font-black tracking-wide text-slate-400 uppercase">Not in {{ $raceType->name }}</span>
@@ -894,18 +1081,32 @@ new #[Title('Races & Lineups')] class extends Component
                         @php($groupNumber = $race->poolGroupNumber())
                         <div
                             wire:key="race-{{ $race->id }}"
-                            wire:click="goLive({{ $race->id }})"
-                            title="{{ $isLive ? 'Live on the vMix lineup feed' : 'Click to make live' }}"
+                            title="{{ $isLive ? 'Live on the vMix lineup feed' : '' }}"
                             @class([
                                 'flex flex-col rounded-xl bg-white shadow-sm',
                                 'ring-2 ring-red-500' => $isLive,
-                                'cursor-pointer ring-1 ring-slate-200 hover:ring-slate-400' => ! $isLive,
+                                'ring-1 ring-slate-200' => ! $isLive,
                             ])
                         >
                             <div class="border-b border-slate-100 px-3 py-2">
                                 <div class="flex items-center gap-2">
                                     <span class="min-w-0 flex-1 truncate font-bold">{{ $race->name }}</span>
-                                    <span class="text-xs text-slate-400">{{ $race->entries->count() }} drivers</span>
+                                    <span class="text-xs text-slate-400">
+                                        {{ $race->entries->count() }}@if ($race->hasFixedField())/{{ $race->starting_positions }}@endif drivers
+                                    </span>
+                                    <label class="flex items-center gap-1 text-[11px] font-semibold text-slate-500">
+                                        Spots
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            max="50"
+                                            value="{{ $race->starting_positions }}"
+                                            wire:click.stop
+                                            wire:change="updateStartingPositions({{ $race->id }}, $event.target.value)"
+                                            placeholder="any"
+                                            class="w-12 rounded-md border border-slate-300 px-1.5 py-0.5 text-xs font-bold text-slate-900 focus:border-amber-500 focus:outline-none"
+                                        >
+                                    </label>
                                     @if ($isLive)
                                         <span class="rounded bg-red-600 px-2 py-0.5 text-xs font-bold text-white">LIVE</span>
                                     @endif
@@ -928,39 +1129,95 @@ new #[Title('Races & Lineups')] class extends Component
                                 @endif
                             </div>
 
-                            <div
-                                wire:key="race-list-{{ $race->id }}-{{ $version }}"
-                                wire:sort.ghost="placeDriver"
-                                wire:sort:group="drivers"
-                                wire:sort:group-id="{{ $race->id }}"
-                                @class([
-                                    'grid min-h-16 flex-1 grid-cols-2 content-start gap-1 p-2',
-                                    'bg-[repeating-linear-gradient(45deg,transparent,transparent_8px,var(--color-slate-50)_8px,var(--color-slate-50)_16px)]' => $race->entries->isEmpty(),
-                                ])
-                            >
-                                @foreach ($race->entries as $entry)
-                                    <div
-                                        wire:key="entry-{{ $entry->id }}"
-                                        wire:sort:item="e{{ $entry->id }}"
-                                        title="Row {{ (int) ceil($entry->start_position / 2) }} {{ $entry->start_position % 2 ? 'inside' : 'outside' }}"
-                                        class="flex min-w-0 cursor-grab items-center gap-1.5 rounded-md border border-slate-200 bg-white px-1.5 py-1 text-sm hover:border-amber-400"
-                                    >
-                                        <span class="w-4 shrink-0 text-right text-xs font-bold text-slate-400">{{ $entry->start_position }}</span>
-                                        <span class="w-9 shrink-0 rounded bg-slate-900 py-0.5 text-center text-xs font-black text-white">{{ filled($entry->competitor->car_number) ? $entry->competitor->car_number : '—' }}</span>
-                                        <span class="min-w-0 flex-1 truncate">{{ $entry->competitor->full_name }}</span>
-                                        @if ($entry->car)
-                                            <span title="Assigned invitational car" class="shrink-0 rounded bg-amber-400 px-1 py-0.5 font-mono text-[10px] font-black text-slate-900">{{ $entry->car->number }}</span>
-                                        @endif
-                                        <button
-                                            type="button"
-                                            wire:sort:ignore
-                                            wire:click.stop="removeFromRace({{ $race->id }}, {{ $entry->competitor_id }})"
-                                            title="Remove from {{ $race->name }}"
-                                            class="rounded px-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                                        >&times;</button>
-                                    </div>
-                                @endforeach
-                            </div>
+                            @if ($race->hasFixedField())
+                                <div class="grid min-h-16 flex-1 grid-cols-2 content-start gap-1 p-2">
+                                    @foreach ($race->lineupSlots() as $slot)
+                                        @php($entry = $slot['entry'])
+                                        @php($position = $slot['position'])
+                                        <div
+                                            wire:key="slot-{{ $race->id }}-{{ $position }}-{{ $version }}"
+                                            wire:sort.ghost="placeDriver"
+                                            wire:sort:group="drivers"
+                                            wire:sort:group-id="{{ $race->id }}_{{ $position }}"
+                                            title="Row {{ (int) ceil($position / 2) }} {{ $position % 2 ? 'inside' : 'outside' }}"
+                                            @class([
+                                                'min-h-9 rounded-md',
+                                                'border border-dashed border-slate-200 bg-slate-50' => ! $entry,
+                                            ])
+                                        >
+                                            @if ($entry)
+                                                <div
+                                                    wire:key="entry-{{ $entry->id }}"
+                                                    wire:sort:item="e{{ $entry->id }}"
+                                                    class="flex min-w-0 cursor-grab items-center gap-1.5 rounded-md border border-slate-200 bg-white px-1.5 py-1 text-sm hover:border-amber-400"
+                                                >
+                                                    <span class="w-4 shrink-0 text-right text-xs font-bold text-slate-400">{{ $position }}</span>
+                                                    <span class="w-9 shrink-0 rounded bg-slate-900 py-0.5 text-center text-xs font-black text-white">{{ filled($entry->competitor->car_number) ? $entry->competitor->car_number : '—' }}</span>
+                                                    <span class="min-w-0 flex-1 truncate">{{ $entry->competitor->full_name }}</span>
+                                                    @if ($raceType->assigns_by_pill && filled($entry->competitor->pill_number))
+                                                        <span title="Pill {{ $entry->competitor->pill_number }}" class="shrink-0 rounded bg-slate-100 px-1 font-mono text-[10px] font-black text-slate-600">P{{ $entry->competitor->pill_number }}</span>
+                                                    @endif
+                                                    @if ($entry->car)
+                                                        <span title="Assigned invitational car" class="shrink-0 rounded bg-amber-400 px-1 py-0.5 font-mono text-[10px] font-black text-slate-900">{{ $entry->car->number }}</span>
+                                                    @endif
+                                                    <button
+                                                        type="button"
+                                                        wire:sort:ignore
+                                                        wire:click.stop="removeFromRace({{ $race->id }}, {{ $entry->competitor_id }})"
+                                                        title="Remove from {{ $race->name }}"
+                                                        class="rounded px-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                                                    >&times;</button>
+                                                </div>
+                                            @else
+                                                <div
+                                                    wire:sort:item="s{{ $race->id }}_{{ $position }}"
+                                                    class="flex h-full min-h-9 cursor-pointer items-center gap-1.5 px-1.5 py-1 text-sm text-slate-300"
+                                                >
+                                                    <span class="w-4 shrink-0 text-right text-xs font-bold">{{ $position }}</span>
+                                                    <span class="truncate">Empty</span>
+                                                </div>
+                                            @endif
+                                        </div>
+                                    @endforeach
+                                </div>
+                            @else
+                                <div
+                                    wire:key="race-list-{{ $race->id }}-{{ $version }}"
+                                    wire:sort.ghost="placeDriver"
+                                    wire:sort:group="drivers"
+                                    wire:sort:group-id="{{ $race->id }}"
+                                    @class([
+                                        'grid min-h-16 flex-1 grid-cols-2 content-start gap-1 p-2',
+                                        'bg-[repeating-linear-gradient(45deg,transparent,transparent_8px,var(--color-slate-50)_8px,var(--color-slate-50)_16px)]' => $race->entries->isEmpty(),
+                                    ])
+                                >
+                                    @foreach ($race->entries as $entry)
+                                        <div
+                                            wire:key="entry-{{ $entry->id }}"
+                                            wire:sort:item="e{{ $entry->id }}"
+                                            title="Row {{ (int) ceil($entry->start_position / 2) }} {{ $entry->start_position % 2 ? 'inside' : 'outside' }}"
+                                            class="flex min-w-0 cursor-grab items-center gap-1.5 rounded-md border border-slate-200 bg-white px-1.5 py-1 text-sm hover:border-amber-400"
+                                        >
+                                            <span class="w-4 shrink-0 text-right text-xs font-bold text-slate-400">{{ $entry->start_position }}</span>
+                                            <span class="w-9 shrink-0 rounded bg-slate-900 py-0.5 text-center text-xs font-black text-white">{{ filled($entry->competitor->car_number) ? $entry->competitor->car_number : '—' }}</span>
+                                            <span class="min-w-0 flex-1 truncate">{{ $entry->competitor->full_name }}</span>
+                                            @if ($raceType->assigns_by_pill && filled($entry->competitor->pill_number))
+                                                <span title="Pill {{ $entry->competitor->pill_number }}" class="shrink-0 rounded bg-slate-100 px-1 font-mono text-[10px] font-black text-slate-600">P{{ $entry->competitor->pill_number }}</span>
+                                            @endif
+                                            @if ($entry->car)
+                                                <span title="Assigned invitational car" class="shrink-0 rounded bg-amber-400 px-1 py-0.5 font-mono text-[10px] font-black text-slate-900">{{ $entry->car->number }}</span>
+                                            @endif
+                                            <button
+                                                type="button"
+                                                wire:sort:ignore
+                                                wire:click.stop="removeFromRace({{ $race->id }}, {{ $entry->competitor_id }})"
+                                                title="Remove from {{ $race->name }}"
+                                                class="rounded px-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                                            >&times;</button>
+                                        </div>
+                                    @endforeach
+                                </div>
+                            @endif
 
                             <div class="flex justify-between border-t border-slate-100 px-2 py-1 text-xs">
                                 <button

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Car;
 use App\Models\Competitor;
 use App\Models\Race;
 use App\Models\RaceType;
@@ -71,6 +72,16 @@ class VmixFeedTest extends TestCase
         $this->assertArrayNotHasKey('Row1Box.Source', $pages[0]);
     }
 
+    public function test_the_vmix_page_turns_a_race_live(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $race = Race::factory()->create();
+
+        Livewire::test('pages::vmix')->set('activeRaceId', (string) $race->id);
+
+        $this->assertSame((string) $race->id, Setting::get(Setting::ActiveRace));
+    }
+
     public function test_drivers_per_dataset_can_be_changed_on_the_vmix_page(): void
     {
         $this->actingAs(User::factory()->create());
@@ -116,6 +127,27 @@ class VmixFeedTest extends TestCase
         $this->assertSame('', $page['Race.Text']);
         $this->assertSame(0, $page['TotalStarting.Text']);
         $this->assertSame('', $page['Number1.Text']);
+        $this->assertSame('', $page['Driver1CarAssignment']);
+    }
+
+    public function test_lineup_feed_includes_kart_assignment_for_each_driver(): void
+    {
+        $type = RaceType::factory()->create();
+        $race = Race::factory()->for($type)->create();
+        $fast = Car::factory()->create(['number' => '01', 'time_ms' => 10000]);
+        $slow = Car::factory()->create(['number' => '99', 'time_ms' => 12000]);
+        $type->cars()->attach($fast->id, ['sort_order' => 0]);
+        $type->cars()->attach($slow->id, ['sort_order' => 1]);
+        $heavy = Competitor::factory()->create(['weight' => 200.0]);
+        $light = Competitor::factory()->create(['weight' => 140.0]);
+        $race->syncLineup([$heavy->id, $light->id]);
+        Setting::put(Setting::ActiveRace, (string) $race->id);
+
+        $page = $this->getJson(route('feeds.lineup'))->json('Lineup.0');
+
+        $this->assertSame('01', $page['Driver1CarAssignment']);
+        $this->assertSame('99', $page['Driver2CarAssignment']);
+        $this->assertSame('', $page['Driver3CarAssignment']);
     }
 
     public function test_every_image_source_is_set_even_for_empty_spots(): void

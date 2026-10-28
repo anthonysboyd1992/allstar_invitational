@@ -62,7 +62,7 @@ class LineupPrintTest extends TestCase
             ->assertSee('MOVE OVER MICHIGAN DIRT LATE MODEL SERIES - HEAT RACE 1')
             ->assertSee('Pos')
             ->assertSee('Kart Assignment')
-            ->assertSee('.kart { font-weight: 700; text-align: center', false)
+            ->assertSee('.pill, .weight, .kart { text-align: center', false)
             ->assertSee('Conner Zbozien')
             ->assertSee('St. Clair Shores, MI')
             ->assertSee('2024 Flat Rock Speedway Track Champion')
@@ -85,6 +85,7 @@ class LineupPrintTest extends TestCase
             ->assertSee('table-header-group')
             ->assertSee('print-color-adjust: exact')
             ->assertSee('#ee6426')
+            ->assertSee('.cols th { background: #111')
             ->assertSee('race-block')
             ->assertSee('page-break-inside: avoid')
             ->assertDontSee('Heat Race 2');
@@ -207,6 +208,93 @@ class LineupPrintTest extends TestCase
             ->assertSee('HEAT 1')
             ->assertDontSee('HEAT 2')
             ->assertDontSee('FEATURE');
+    }
+
+    public function test_printed_lineup_includes_pill_before_weight_when_the_type_option_is_on(): void
+    {
+        $type = RaceType::factory()->create(['assigns_by_pill' => true]);
+        $race = Race::factory()->for($type)->create(['name' => 'Heat 1']);
+        $driver = Competitor::factory()->create([
+            'first_name' => 'Ann',
+            'last_name' => 'One',
+            'pill_number' => 17,
+            'weight' => 180.0,
+        ]);
+        $race->syncLineup([$driver->id]);
+
+        $this->get(route('lineups.print', ['races' => [$race->id]]))
+            ->assertOk()
+            ->assertSeeInOrder([
+                'class="accolades">Accolades</th>',
+                'class="pill">Pill</th>',
+                'class="weight">Weight</th>',
+                'Ann One',
+                'class="pill">17</td>',
+                'class="weight">180</td>',
+            ], false);
+    }
+
+    public function test_printed_lineup_omits_pill_when_the_type_option_is_off(): void
+    {
+        $type = RaceType::factory()->create(['assigns_by_pill' => false]);
+        $race = Race::factory()->for($type)->create(['name' => 'Feature']);
+        $driver = Competitor::factory()->create([
+            'first_name' => 'Ann',
+            'last_name' => 'One',
+            'pill_number' => 17,
+        ]);
+        $race->syncLineup([$driver->id]);
+
+        $this->get(route('lineups.print', ['races' => [$race->id]]))
+            ->assertOk()
+            ->assertSee('Ann One')
+            ->assertSee('class="weight">Weight</th>', false)
+            ->assertDontSee('class="pill"', false);
+    }
+
+    public function test_a_fixed_field_prints_empty_starting_spots(): void
+    {
+        $type = RaceType::factory()->create(['name' => 'Feature']);
+        $race = Race::factory()->for($type)->create(['name' => 'Feature', 'starting_positions' => 10]);
+        $driver = Competitor::factory()->create(['first_name' => 'Ann', 'last_name' => 'One']);
+        $race->placeInSlot($driver->id, 10);
+
+        $this->get(route('lineups.print', ['races' => [$race->id]]))
+            ->assertOk()
+            ->assertSeeInOrder([
+                'class="pos">1</td>',
+                'class="pos">6</td>',
+                'class="pos">10</td>',
+                'Ann One',
+            ], false);
+    }
+
+    public function test_each_race_prints_as_its_own_group_even_when_timing_is_one_file(): void
+    {
+        $type = RaceType::factory()->create(['name' => 'Hotlaps', 'combines_groups' => true]);
+        $first = Race::factory()->for($type)->create(['name' => 'Hotlaps 1', 'sponsor' => 'ACME']);
+        $second = Race::factory()->for($type)->create(['name' => 'Hotlaps 2', 'sponsor' => 'ACME']);
+        $drivers = Competitor::factory()->count(4)->sequence(
+            ['first_name' => 'Ann', 'last_name' => 'One'],
+            ['first_name' => 'Bob', 'last_name' => 'Two'],
+            ['first_name' => 'Cara', 'last_name' => 'Three'],
+            ['first_name' => 'Dan', 'last_name' => 'Four'],
+        )->create();
+        $first->syncLineup([$drivers[0]->id, $drivers[1]->id]);
+        $second->syncLineup([$drivers[2]->id, $drivers[3]->id]);
+
+        $this->get(route('lineups.print', ['races' => [$first->id, $second->id]]))
+            ->assertOk()
+            ->assertSeeInOrder([
+                '>ACME - HOTLAPS 1</th>',
+                'Ann One',
+                'Bob Two',
+                '>ACME - HOTLAPS 2</th>',
+                'Cara Three',
+                'Dan Four',
+            ], false)
+            ->assertDontSee('GROUP 1')
+            ->assertDontSee('GROUP 2');
     }
 
     public function test_guests_are_sent_to_the_login_page(): void

@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Collection;
 
-#[Fillable(['name', 'sort_order', 'cars_per_race', 'cars_allowed'])]
+#[Fillable(['name', 'sort_order', 'cars_per_race', 'cars_allowed', 'combines_groups', 'assigns_by_pill'])]
 class RaceType extends Model
 {
     /** @use HasFactory<RaceTypeFactory> */
@@ -85,17 +85,38 @@ class RaceType extends Model
     }
 
     /**
+     * How many pool groups Alternate splits into. Uses the allowed cap so G1/G2 exist as cars are added.
+     */
+    public function groupCount(): int
+    {
+        $this->loadMissing('cars');
+        $perRace = $this->cars_per_race;
+
+        if (! $perRace || $perRace <= 0) {
+            return 1;
+        }
+
+        $capacity = $this->cars_allowed ?: $this->cars->count();
+
+        if ($capacity <= $perRace) {
+            return 1;
+        }
+
+        return (int) ceil($capacity / $perRace);
+    }
+
+    /**
      * 0-based group this pool position falls into when the pool is split.
      */
     public function poolGroupIndex(int $position): int
     {
-        $size = $this->groupSize();
+        $count = $this->groupCount();
 
-        return $size > 0 ? intdiv($position, $size) : 0;
+        return $count > 0 ? $position % $count : 0;
     }
 
     /**
-     * Consecutive groups of groupSize() from the pool, in pool order.
+     * Pool groups in add order: 1st car G1, 2nd G2, and so on when Alternate is on.
      *
      * @return Collection<int, Collection<int, Car>>
      */
@@ -103,17 +124,24 @@ class RaceType extends Model
     {
         $this->loadMissing('cars');
         $pool = $this->cars->values();
+        $groupCount = $this->groupCount();
 
-        if ($pool->isEmpty()) {
-            return collect();
+        if ($groupCount <= 1) {
+            return $pool->isEmpty() ? collect() : collect([$pool]);
         }
 
-        return $pool->chunk($this->groupSize())->values();
+        $buckets = array_fill(0, $groupCount, []);
+
+        foreach ($pool as $index => $car) {
+            $buckets[$index % $groupCount][] = $car;
+        }
+
+        return collect($buckets)->map(fn (array $cars) => collect($cars)->values())->values();
     }
 
     public function rotatesPool(): bool
     {
-        return $this->carGroups()->count() > 1;
+        return $this->groupCount() > 1;
     }
 
     /**
@@ -121,8 +149,7 @@ class RaceType extends Model
      */
     public function groupNumberFor(Race $race): int
     {
-        $groups = $this->carGroups();
-        $count = $groups->count();
+        $count = $this->groupCount();
 
         if ($count === 0) {
             return 1;
@@ -132,7 +159,7 @@ class RaceType extends Model
     }
 
     /**
-     * Cars a race draws from the pool. When cars_per_race is smaller than the pool, groups rotate by race order.
+     * Cars a race draws from the pool. When Alternate is on, groups rotate by race order.
      *
      * @return Collection<int, Car>
      */
@@ -156,6 +183,106 @@ class RaceType extends Model
     }
 
     /**
+     * How many drivers go in each race for a pill draw: cars on track, or cars_per_race when the pool is still empty.
+     */
+    public function lineupGroupSize(): int
+    {
+        $this->loadMissing('cars');
+
+        if ($this->cars->isNotEmpty()) {
+            return $this->groupSize();
+        }
+
+        return $this->cars_per_race && $this->cars_per_race > 0 ? $this->cars_per_race : 1;
+    }
+
+    /**
+     * Deal every driver across this type's races: lowest pill to race 1, next to race 2, and so on.
+     */
+    public function assignByPillDraw(): int
+    {
+        $this->loadMissing(['cars', 'races']);
+        $races = $this->racesInProgramOrder();
+
+        if ($races->isEmpty()) {
+            return -1;
+        }
+
+        $drivers = Competitor::sortByPillNumber(Competitor::query()->get());
+
+        if ($drivers->isEmpty()) {
+            return 0;
+        }
+
+        $this->update(['assigns_by_pill' => true]);
+        $this->unsetRelation('races');
+        $this->load(['cars', 'races']);
+        $races = $this->racesInProgramOrder();
+
+        $buckets = array_fill(0, $races->count(), []);
+
+        foreach ($drivers as $index => $driver) {
+            $buckets[$index % $races->count()][] = $driver;
+        }
+
+        foreach ($races as $index => $race) {
+            $race->setRelation('raceType', $this);
+            $race->syncLineup(collect($buckets[$index])->pluck('id')->all());
+        }
+
+        return $races->count();
+    }
+
+    /**
+     * Lineup rows for the timing page, in program order across every group.
+     *
+     * @return Collection<int, RaceEntry>
+     */
+    public function timingEntries(): Collection
+    {
+        $this->loadMissing(['races.entries.competitor']);
+
+        return $this->racesInProgramOrder()->flatMap->entries->values();
+    }
+
+    /**
+     * Drivers for one timing CSV, in program order across every group.
+     *
+     * @return Collection<int, Competitor>
+     */
+    public function transponderLineup(): Collection
+    {
+        return $this->timingEntries()
+            ->map(fn (RaceEntry $entry): ?Competitor => $entry->competitor)
+            ->filter(fn (?Competitor $competitor): bool => filled($competitor?->transponder))
+            ->values();
+    }
+
+    /**
+     * Drivers in this type who are on a lineup but have no transponder.
+     */
+    public function missingTransponderCount(): int
+    {
+        $this->loadMissing(['races.entries.competitor']);
+
+        return $this->races
+            ->flatMap->entries
+            ->unique('competitor_id')
+            ->filter(fn ($entry): bool => blank($entry->competitor?->transponder))
+            ->count();
+    }
+
+    /**
+     * Laps used when this type shares one timing file.
+     */
+    public function sessionLaps(): ?int
+    {
+        $this->loadMissing('races');
+
+        return $this->racesInProgramOrder()->first()?->laps;
+    }
+
+    /**
      * Pair each race: heaviest driver to fastest car in that race's group.
      */
     public function assignCarsByWeight(): void
@@ -167,6 +294,19 @@ class RaceType extends Model
             $race->setRelation('raceType', $this);
             $race->assignCarsByWeight();
         });
+    }
+
+    private function ensureRaceCount(int $needed): void
+    {
+        $existing = $this->races->count();
+        $nextOrder = (int) $this->races->max('sort_order');
+
+        for ($number = $existing + 1; $number <= $needed; $number++) {
+            $this->races()->create([
+                'name' => "{$this->name} {$number}",
+                'sort_order' => ++$nextOrder,
+            ]);
+        }
     }
 
     /**
@@ -181,52 +321,6 @@ class RaceType extends Model
     }
 
     /**
-     * Give the 1st (fastest) car to group 1, the 2nd to group 2, and so on, then flatten back into pool order.
-     */
-    public function dealIntoGroups(): bool
-    {
-        $this->loadMissing('cars');
-
-        if ($this->cars->count() < 2 || $this->carGroups()->count() < 2) {
-            return false;
-        }
-
-        $this->sortPoolByTime();
-        $this->unsetRelation('cars');
-        $this->loadMissing('cars');
-
-        $pool = $this->cars->values();
-        $groupCount = $this->carGroups()->count();
-        $buckets = array_fill(0, $groupCount, []);
-
-        foreach ($pool as $index => $car) {
-            $buckets[$index % $groupCount][] = $car;
-        }
-
-        $order = 0;
-
-        foreach ($buckets as $bucket) {
-            foreach ($bucket as $car) {
-                $this->cars()->updateExistingPivot($car->id, ['sort_order' => $order]);
-                $order++;
-            }
-        }
-
-        $this->unsetRelation('cars');
-
-        return true;
-    }
-
-    /**
-     * Rank the pool fastest to slowest by lap time.
-     */
-    public function sortPoolByTime(): void
-    {
-        Car::sortFastestFirst($this->cars()->get())
-            ->each(fn (Car $car, int $index) => $this->cars()->updateExistingPivot($car->id, ['sort_order' => $index]));
-    }
-
-    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>
@@ -237,6 +331,8 @@ class RaceType extends Model
             'sort_order' => 'integer',
             'cars_per_race' => 'integer',
             'cars_allowed' => 'integer',
+            'combines_groups' => 'boolean',
+            'assigns_by_pill' => 'boolean',
         ];
     }
 }

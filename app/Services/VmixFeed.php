@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Competitor;
 use App\Models\Race;
+use App\Models\RaceEntry;
 use App\Models\Setting;
 use App\Models\VmixSection;
 
@@ -18,9 +19,16 @@ class VmixFeed
     {
         $race ??= Setting::activeRace();
         $className = $this->className();
-        $competitors = $race ? $race->entries->pluck('competitor')->filter()->values() : collect();
+
+        if ($race) {
+            $race->loadMissing(['entries.competitor', 'entries.car']);
+        }
+
+        $entries = $race
+            ? $race->entries->filter(fn (RaceEntry $entry): bool => filled($entry->competitor))->values()
+            : collect();
         $perPage = Setting::driversPerDataset();
-        $pages = $competitors->chunk($perPage)->map->values();
+        $pages = $entries->chunk($perPage)->map->values();
 
         if ($pages->isEmpty()) {
             $pages = collect([collect()]);
@@ -31,19 +39,19 @@ class VmixFeed
         $transfers = (string) $race?->transfers;
 
         return [
-            'Lineup' => $pages->map(function ($pageCompetitors, int $pageIndex) use ($header, $laps, $transfers, $race, $competitors, $className, $pages, $perPage): array {
+            'Lineup' => $pages->map(function ($pageEntries, int $pageIndex) use ($header, $laps, $transfers, $race, $entries, $className, $pages, $perPage): array {
                 $page = $header + [
                     'Trans_Dist.Text' => implode(' | ', array_filter([$transfers, $laps])),
                     'Laps.Text' => (string) $race?->laps,
                     'Sponsor.Text' => (string) $race?->sponsor,
                     'Transfers.Text' => $transfers,
-                    'TotalStarting.Text' => $competitors->count(),
+                    'TotalStarting.Text' => $entries->count(),
                     'Page' => $pageIndex + 1,
                     'TotalPages' => $pages->count(),
                 ];
 
                 for ($slot = 1; $slot <= $perPage; $slot++) {
-                    $page += $this->slot($slot, $pageCompetitors->get($slot - 1), $pageIndex * $perPage + $slot, $className);
+                    $page += $this->slot($slot, $pageEntries->get($slot - 1), $pageIndex * $perPage + $slot, $className);
                 }
 
                 return $page;
@@ -114,12 +122,16 @@ class VmixFeed
     /**
      * @return array<string, string>
      */
-    private function slot(int $slot, ?Competitor $competitor, int $startPosition, string $className): array
+    private function slot(int $slot, ?RaceEntry $entry, int $startPosition, string $className): array
     {
+        $competitor = $entry?->competitor;
+        $assignment = (string) ($entry?->car?->number ?? '');
+
         if (! $competitor) {
             return [
                 "StartPos{$slot}" => '',
                 "Number{$slot}.Text" => '',
+                "Driver{$slot}CarAssignment" => '',
                 "FullName{$slot}.Text" => '',
                 "FirstName{$slot}.Text" => '',
                 "LastName{$slot}.Text" => '',
@@ -137,6 +149,7 @@ class VmixFeed
         return [
             "StartPos{$slot}" => (string) $startPosition,
             "Number{$slot}.Text" => $number,
+            "Driver{$slot}CarAssignment" => $assignment,
             "FullName{$slot}.Text" => $fullName,
             "FirstName{$slot}.Text" => $competitor->first_name,
             "LastName{$slot}.Text" => $competitor->last_name,

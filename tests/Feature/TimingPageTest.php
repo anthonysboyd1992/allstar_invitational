@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Competitor;
 use App\Models\Race;
+use App\Models\RaceType;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -60,5 +61,37 @@ class TimingPageTest extends TestCase
 
         $this->assertSame(12, $race->refresh()->laps);
         $this->assertSame('108571', $driver->refresh()->transponder);
+    }
+
+    public function test_grouped_types_offer_one_csv_instead_of_a_file_per_group(): void
+    {
+        $type = RaceType::factory()->create(['name' => 'Hotlaps', 'combines_groups' => true]);
+        $first = Race::factory()->for($type)->create(['name' => 'Hotlaps 1', 'laps' => 4]);
+        $second = Race::factory()->for($type)->create(['name' => 'Hotlaps 2', 'laps' => 4]);
+        $heat = Race::factory()->create(['name' => 'Heat 1']);
+
+        $this->get(route('timing'))
+            ->assertOk()
+            ->assertSee(route('exports.type-transponders', $type), false)
+            ->assertSee(route('exports.type-laps', $type), false)
+            ->assertDontSee(route('exports.transponders', $first), false)
+            ->assertDontSee(route('exports.laps', $first), false)
+            ->assertDontSee(route('exports.transponders', $second), false)
+            ->assertDontSee(route('exports.laps', $second), false)
+            ->assertDontSee('Hotlaps 1')
+            ->assertDontSee('Hotlaps 2')
+            ->assertSee(route('exports.transponders', $heat), false);
+    }
+
+    public function test_laps_on_a_grouped_type_update_every_group(): void
+    {
+        $type = RaceType::factory()->create(['combines_groups' => true]);
+        $first = Race::factory()->for($type)->create(['laps' => 4]);
+        $second = Race::factory()->for($type)->create(['laps' => 4]);
+
+        Livewire::test('pages::timing')->call('updateLaps', $first->id, '8');
+
+        $this->assertSame(8, $first->refresh()->laps);
+        $this->assertSame(8, $second->refresh()->laps);
     }
 }

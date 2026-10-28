@@ -26,7 +26,52 @@ class LineupBoardTest extends TestCase
     {
         Race::factory()->create(['name' => 'Heat 1']);
 
-        $this->get(route('lineups'))->assertOk()->assertSee('Heat 1');
+        $this->get(route('lineups'))
+            ->assertOk()
+            ->assertSee('Heat 1')
+            ->assertSee('Assign by pill')
+            ->assertDontSee('Assign by weight')
+            ->assertDontSee('toggleAssignsByPill');
+    }
+
+    public function test_lineup_cards_show_a_drivers_pill_number_when_the_type_option_is_on(): void
+    {
+        $type = RaceType::factory()->create(['assigns_by_pill' => true]);
+        $race = Race::factory()->for($type)->create();
+        $driver = Competitor::factory()->create([
+            'pill_number' => 17,
+            'first_name' => 'Ann',
+            'last_name' => 'One',
+        ]);
+        $race->syncLineup([$driver->id]);
+
+        $this->get(route('lineups'))->assertOk()->assertSee('P17');
+    }
+
+    public function test_lineup_cards_hide_pill_when_the_type_option_is_off(): void
+    {
+        $type = RaceType::factory()->create(['assigns_by_pill' => false]);
+        $race = Race::factory()->for($type)->create();
+        $driver = Competitor::factory()->create(['pill_number' => 17]);
+        $race->syncLineup([$driver->id]);
+
+        $this->get(route('lineups'))->assertOk()->assertDontSee('P17');
+    }
+
+    public function test_editing_a_race_type_can_turn_on_show_pill(): void
+    {
+        $type = RaceType::factory()->create(['name' => 'Heat', 'assigns_by_pill' => false]);
+
+        Livewire::test('pages::lineups')
+            ->call('openRaceTypeEditor', $type->id)
+            ->assertSet('typeForm.name', 'Heat')
+            ->assertSet('typeForm.shows_pill', false)
+            ->set('typeForm.shows_pill', true)
+            ->call('saveRaceType')
+            ->assertHasNoErrors()
+            ->assertSet('editingRaceTypeId', null);
+
+        $this->assertTrue($type->refresh()->assigns_by_pill);
     }
 
     public function test_adding_a_race_type_creates_numbered_races(): void
@@ -113,15 +158,15 @@ class LineupBoardTest extends TestCase
         $this->assertSame([1, 2], $race->entries()->pluck('start_position')->all());
     }
 
-    public function test_clicking_a_race_makes_it_live_and_clicking_again_keeps_it_live(): void
+    public function test_the_lineup_board_does_not_make_a_race_live(): void
     {
         $race = Race::factory()->create();
 
-        $component = Livewire::test('pages::lineups')->call('goLive', $race->id);
-        $this->assertSame((string) $race->id, Setting::get(Setting::ActiveRace));
+        Livewire::test('pages::lineups')
+            ->assertDontSee('goLive('.$race->id.')', false)
+            ->assertSee('Pick a live race on the vMix page');
 
-        $component->call('goLive', $race->id);
-        $this->assertSame((string) $race->id, Setting::get(Setting::ActiveRace));
+        $this->assertNull(Setting::get(Setting::ActiveRace));
     }
 
     public function test_clicking_drivers_appends_them_to_the_live_race(): void
@@ -129,15 +174,17 @@ class LineupBoardTest extends TestCase
         $heat = Race::factory()->create();
         $feature = Race::factory()->create();
         [$first, $second] = Competitor::factory()->count(2)->create();
+        Setting::put(Setting::ActiveRace, (string) $heat->id);
 
         Livewire::test('pages::lineups')
-            ->call('goLive', $heat->id)
             ->call('addToLiveRace', $first->id)
             ->call('addToLiveRace', $second->id)
             ->call('addToLiveRace', $first->id)
-            ->assertDispatched('notify')
-            ->call('goLive', $feature->id)
-            ->call('addToLiveRace', $first->id);
+            ->assertDispatched('notify');
+
+        Setting::put(Setting::ActiveRace, (string) $feature->id);
+
+        Livewire::test('pages::lineups')->call('addToLiveRace', $first->id);
 
         $this->assertSame([$first->id, $second->id], $heat->lineupIds());
         $this->assertSame([$first->id], $feature->lineupIds());
@@ -150,9 +197,9 @@ class LineupBoardTest extends TestCase
         $one = Competitor::factory()->create(['car_number' => '1']);
         $twoB = Competitor::factory()->create(['car_number' => '2B']);
         $eleven = Competitor::factory()->create(['car_number' => '11']);
+        Setting::put(Setting::ActiveRace, (string) $heat->id);
 
         $component = Livewire::test('pages::lineups')
-            ->call('goLive', $heat->id)
             ->call('addToLiveRace', $one->id);
 
         $this->assertSame([$twoB->id, $eleven->id, $one->id], $component->get('roster')->pluck('id')->all());
@@ -160,7 +207,8 @@ class LineupBoardTest extends TestCase
         $component->call('addToLiveRace', $eleven->id);
         $this->assertSame([$twoB->id, $one->id, $eleven->id], $component->get('roster')->pluck('id')->all());
 
-        $component->call('goLive', $feature->id);
+        Setting::put(Setting::ActiveRace, (string) $feature->id);
+        $component->call('$refresh');
         $this->assertSame([$one->id, $twoB->id, $eleven->id], $component->get('roster')->pluck('id')->all());
     }
 
@@ -204,6 +252,7 @@ class LineupBoardTest extends TestCase
             ->set('raceForm.race_type_id', (string) $mains->id)
             ->set('raceForm.laps', '25')
             ->set('raceForm.transfers', 'Top 3 transfer')
+            ->set('raceForm.starting_positions', '12')
             ->set('raceForm.sponsor', 'Casey’s')
             ->call('saveRace')
             ->assertHasNoErrors()
@@ -214,6 +263,7 @@ class LineupBoardTest extends TestCase
         $this->assertSame($mains->id, $race->race_type_id);
         $this->assertSame(25, $race->laps);
         $this->assertSame('Top 3 transfer', $race->transfers);
+        $this->assertSame(12, $race->starting_positions);
         $this->assertSame('Casey’s', $race->sponsor);
     }
 
@@ -236,5 +286,104 @@ class LineupBoardTest extends TestCase
         $race->refresh();
         $this->assertNull($race->laps);
         $this->assertNull($race->sponsor);
+    }
+
+    public function test_a_fixed_field_can_fill_tenth_without_the_front_row(): void
+    {
+        $race = Race::factory()->create(['starting_positions' => 10]);
+        $driver = Competitor::factory()->create();
+
+        Livewire::test('pages::lineups')->call('placeDriver', 'c'.$driver->id, 0, $race->id.'_10');
+
+        $this->assertSame([$driver->id], $race->fresh()->lineupIds());
+        $this->assertSame(10, $race->entries()->first()->start_position);
+        $this->assertSame(1, $race->entries()->count());
+    }
+
+    public function test_removing_from_a_fixed_field_leaves_the_later_spot(): void
+    {
+        $race = Race::factory()->create(['starting_positions' => 10]);
+        [$front, $rear] = Competitor::factory()->count(2)->create();
+        $race->placeInSlot($front->id, 6);
+        $race->placeInSlot($rear->id, 10);
+
+        Livewire::test('pages::lineups')->call('removeFromRace', $race->id, $front->id);
+
+        $this->assertSame([$rear->id], $race->fresh()->lineupIds());
+        $this->assertSame(10, $race->entries()->first()->start_position);
+    }
+
+    public function test_clicking_a_driver_fills_the_first_empty_spot_of_a_fixed_field(): void
+    {
+        $race = Race::factory()->create(['starting_positions' => 10]);
+        $front = Competitor::factory()->create();
+        $rear = Competitor::factory()->create();
+        $race->placeInSlot($rear->id, 10);
+        Setting::put(Setting::ActiveRace, (string) $race->id);
+
+        Livewire::test('pages::lineups')->call('addToLiveRace', $front->id);
+
+        $this->assertSame(
+            [1, 10],
+            $race->fresh()->entries()->pluck('start_position')->all(),
+        );
+    }
+
+    public function test_a_full_fixed_field_rejects_another_starter(): void
+    {
+        $race = Race::factory()->create(['starting_positions' => 2]);
+        [$first, $second, $third] = Competitor::factory()->count(3)->create();
+        $race->placeInSlot($first->id, 1);
+        $race->placeInSlot($second->id, 2);
+        Setting::put(Setting::ActiveRace, (string) $race->id);
+
+        Livewire::test('pages::lineups')
+            ->call('addToLiveRace', $third->id)
+            ->assertDispatched('notify', type: 'error');
+
+        $this->assertSame(2, $race->fresh()->entries()->count());
+    }
+
+    public function test_dropping_on_an_occupied_spot_from_the_roster_is_rejected(): void
+    {
+        $race = Race::factory()->create(['starting_positions' => 10]);
+        [$occupant, $incoming] = Competitor::factory()->count(2)->create();
+        $race->placeInSlot($occupant->id, 10);
+
+        Livewire::test('pages::lineups')
+            ->call('placeDriver', 'c'.$incoming->id, 0, $race->id.'_10')
+            ->assertDispatched('notify', type: 'error');
+
+        $this->assertSame([$occupant->id], $race->fresh()->lineupIds());
+    }
+
+    public function test_reordering_inside_a_fixed_field_swaps_spots(): void
+    {
+        $race = Race::factory()->create(['starting_positions' => 10]);
+        [$inside, $outside] = Competitor::factory()->count(2)->create();
+        $race->placeInSlot($inside->id, 6);
+        $race->placeInSlot($outside->id, 10);
+        $entry = $race->entries()->where('competitor_id', $outside->id)->first();
+
+        Livewire::test('pages::lineups')->call('placeDriver', 'e'.$entry->id, 0, $race->id.'_6');
+
+        $this->assertSame(
+            [6 => $outside->id, 10 => $inside->id],
+            $race->fresh()->entries()->pluck('competitor_id', 'start_position')->all(),
+        );
+    }
+
+    public function test_clearing_starting_positions_packs_the_lineup_from_the_front(): void
+    {
+        $race = Race::factory()->create(['starting_positions' => 10]);
+        [$first, $second] = Competitor::factory()->count(2)->create();
+        $race->placeInSlot($first->id, 6);
+        $race->placeInSlot($second->id, 10);
+
+        Livewire::test('pages::lineups')->call('updateStartingPositions', $race->id, '');
+
+        $this->assertNull($race->fresh()->starting_positions);
+        $this->assertSame([$first->id, $second->id], $race->lineupIds());
+        $this->assertSame([1, 2], $race->entries()->pluck('start_position')->all());
     }
 }

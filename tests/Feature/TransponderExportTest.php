@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Competitor;
 use App\Models\Race;
+use App\Models\RaceType;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -63,5 +64,37 @@ class TransponderExportTest extends TestCase
         $this->assertSame("Laps=8\r\n", $response->streamedContent());
 
         $this->assertSame("Laps=0\r\n", $this->get(route('exports.laps', $noLaps))->streamedContent());
+    }
+
+    public function test_a_grouped_type_downloads_one_csv_for_every_group(): void
+    {
+        $type = RaceType::factory()->create(['name' => 'Hotlaps', 'combines_groups' => true]);
+        $first = Race::factory()->for($type)->create(['name' => 'Hotlaps 1', 'sort_order' => 2, 'laps' => 3]);
+        $second = Race::factory()->for($type)->create(['name' => 'Hotlaps 2', 'sort_order' => 1, 'laps' => 3]);
+        $other = Race::factory()->create(['name' => 'Heat 1']);
+
+        $firstDriver = Competitor::factory()->create(['transponder' => '111', 'car_number' => '1', 'last_name' => 'First', 'first_name' => 'Ann']);
+        $secondDriver = Competitor::factory()->create(['transponder' => '222', 'car_number' => '2', 'last_name' => 'Second', 'first_name' => 'Bob']);
+        $skipped = Competitor::factory()->create(['transponder' => null, 'car_number' => '3']);
+        $elsewhere = Competitor::factory()->create(['transponder' => '999', 'car_number' => '9']);
+
+        $second->syncLineup([$secondDriver->id]);
+        $first->syncLineup([$firstDriver->id, $skipped->id]);
+        $other->syncLineup([$elsewhere->id]);
+
+        $response = $this->get(route('exports.type-transponders', $type))->assertOk();
+
+        $this->assertStringContainsString('Hotlaps.csv', $response->headers->get('Content-Disposition'));
+        $this->assertSame(
+            "\"Trns ID\",#,\"Last Name\",\"First Name\",Misc,\"Backup Trns ID\"\r\n"
+            ."111,1,First,Ann,,\r\n"
+            ."222,2,Second,Bob,,\r\n",
+            $response->streamedContent(),
+        );
+        $this->assertSame(
+            "Laps=3\r\n",
+            $this->get(route('exports.type-laps', $type))->streamedContent(),
+        );
+        $this->assertStringContainsString('Hotlaps.dat', $this->get(route('exports.type-laps', $type))->headers->get('Content-Disposition'));
     }
 }

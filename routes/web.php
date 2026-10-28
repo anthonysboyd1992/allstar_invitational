@@ -27,6 +27,8 @@ Route::middleware('auth')->group(function () {
         Route::livewire('/timing', 'pages::timing')->name('timing');
         Route::get('/exports/races/{race}/transponders.csv', [TransponderExportController::class, 'transponders'])->name('exports.transponders');
         Route::get('/exports/races/{race}/laps.dat', [TransponderExportController::class, 'laps'])->name('exports.laps');
+        Route::get('/exports/types/{raceType}/transponders.csv', [TransponderExportController::class, 'typeTransponders'])->name('exports.type-transponders');
+        Route::get('/exports/types/{raceType}/laps.dat', [TransponderExportController::class, 'typeLaps'])->name('exports.type-laps');
     });
 
     Route::post('/logout', LogoutController::class)->name('logout');
