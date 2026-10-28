@@ -2,8 +2,13 @@
 
 namespace App\Models;
 
+use App\Services\ImageCropper;
+use App\Services\MediaStorage;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Validator;
+use RuntimeException;
 
 #[Fillable(['key', 'value'])]
 class Setting extends Model
@@ -27,6 +32,22 @@ class Setting extends Model
      * How the cars page is ordered: number, time, or manual (drag).
      */
     public const CarsSort = 'cars_sort';
+
+    public const LetterheadLeft = 'letterhead_left';
+
+    public const LetterheadRight = 'letterhead_right';
+
+    public const LetterheadDirectory = 'letterhead';
+
+    /**
+     * @var list<string>
+     */
+    public const LetterheadRules = ['image', 'mimes:png,jpg,jpeg,gif,webp', 'max:10240'];
+
+    /**
+     * @var list<string>
+     */
+    public const LetterheadSides = ['left', 'right'];
 
     public const DefaultDriversPerDataset = 12;
 
@@ -64,5 +85,74 @@ class Setting extends Model
         $id = static::get(self::ActiveDriver);
 
         return $id ? Competitor::query()->find($id) : null;
+    }
+
+    /**
+     * Stored path of an uploaded letterhead logo, or null when the built-in image should be used.
+     */
+    public static function letterheadPath(string $side): ?string
+    {
+        return static::get(static::letterheadKey($side));
+    }
+
+    /**
+     * Public URL of the uploaded letterhead logo, or the built-in image when none has been uploaded.
+     */
+    public static function letterheadUrl(string $side): string
+    {
+        $path = static::letterheadPath($side);
+
+        return $path ? MediaStorage::url($path) : asset('images/letterhead-'.$side.'.png');
+    }
+
+    /**
+     * Validate and save a letterhead logo, returning an error message instead of throwing when it can't be used.
+     */
+    public static function replaceLetterhead(string $side, mixed $photo): ?string
+    {
+        $validator = Validator::make(['logo' => $photo], ['logo' => ['required', ...self::LetterheadRules]]);
+
+        if ($validator->fails()) {
+            return $validator->errors()->first();
+        }
+
+        try {
+            static::storeLetterhead($side, $photo);
+        } catch (RuntimeException $exception) {
+            return $exception->getMessage();
+        }
+
+        return null;
+    }
+
+    public static function storeLetterhead(string $side, UploadedFile $photo): void
+    {
+        $path = app(ImageCropper::class)->storePng(
+            $photo->getRealPath(),
+            self::LetterheadDirectory,
+            MediaStorage::diskName(),
+        );
+
+        static::deleteLetterhead($side);
+        static::put(static::letterheadKey($side), $path);
+    }
+
+    public static function deleteLetterhead(string $side): void
+    {
+        $path = static::letterheadPath($side);
+
+        if ($path) {
+            MediaStorage::disk()->delete($path);
+        }
+
+        static::put(static::letterheadKey($side), null);
+    }
+
+    public static function letterheadKey(string $side): string
+    {
+        return match ($side) {
+            'left' => self::LetterheadLeft,
+            'right' => self::LetterheadRight,
+        };
     }
 }

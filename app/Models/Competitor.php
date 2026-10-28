@@ -112,6 +112,22 @@ class Competitor extends Model
     }
 
     /**
+     * Whole pounds without a trailing .0, otherwise one decimal.
+     */
+    public function formattedWeight(): string
+    {
+        if ($this->weight === null) {
+            return '';
+        }
+
+        $value = (float) $this->weight;
+
+        return abs($value - round($value)) < 0.05
+            ? (string) (int) round($value)
+            : rtrim(rtrim(number_format($value, 1, '.', ''), '0'), '.');
+    }
+
+    /**
      * "#0 Last First" in lookups. Car number 0 is a real number; only a missing number is omitted.
      */
     public function labeledName(): string

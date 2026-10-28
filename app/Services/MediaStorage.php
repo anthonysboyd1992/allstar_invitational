@@ -6,11 +6,11 @@ use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * Where uploaded headshots and vMix images live: the local public disk by default, or S3 via VMIX_MEDIA_DISK.
+ * Where uploaded headshots, vMix images, and letterhead logos live: the local public disk by default, or S3 via VMIX_MEDIA_DISK.
  */
 class MediaStorage
 {
-    public const Directories = ['headshots', 'vmix'];
+    public const Directories = ['headshots', 'vmix', 'letterhead'];
 
     public static function diskName(): string
     {

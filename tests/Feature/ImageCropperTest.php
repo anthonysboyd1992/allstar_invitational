@@ -36,6 +36,26 @@ class ImageCropperTest extends TestCase
         $this->assertSame([0, 0, 255], $this->rgbAt($image, 590, 50));
     }
 
+    public function test_storing_a_png_keeps_the_original_aspect_ratio(): void
+    {
+        Storage::fake('public');
+
+        $path = app(ImageCropper::class)->storePng($this->stripedImage(), 'letterhead');
+
+        $image = imagecreatefromstring(Storage::disk('public')->get($path));
+        $this->assertSame([300, 100], [imagesx($image), imagesy($image)]);
+    }
+
+    public function test_storing_a_png_shrinks_when_the_longest_edge_is_over_the_limit(): void
+    {
+        Storage::fake('public');
+
+        $path = app(ImageCropper::class)->storePng($this->stripedImage(), 'letterhead', 'public', 150);
+
+        $image = imagecreatefromstring(Storage::disk('public')->get($path));
+        $this->assertSame([150, 50], [imagesx($image), imagesy($image)]);
+    }
+
     /**
      * A 300x100 PNG with red, green and blue vertical stripes, each 100px wide.
      */

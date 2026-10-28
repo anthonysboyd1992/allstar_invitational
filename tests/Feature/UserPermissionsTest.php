@@ -21,7 +21,7 @@ class UserPermissionsTest extends TestCase
         $this->get(route('timing'))->assertOk();
         $this->get(route('exports.transponders', $race))->assertOk();
 
-        foreach (['competitors', 'cars', 'lineups', 'vmix', 'vmix-data', 'users'] as $routeName) {
+        foreach (['competitors', 'cars', 'lineups', 'vmix', 'vmix-data', 'settings', 'users'] as $routeName) {
             $this->get(route($routeName))->assertForbidden();
         }
     }
@@ -33,6 +33,7 @@ class UserPermissionsTest extends TestCase
         $this->get(route('vmix'))->assertOk();
         $this->get(route('vmix-data'))->assertOk();
         $this->get(route('timing'))->assertForbidden();
+        $this->get(route('settings'))->assertForbidden();
         $this->get(route('users'))->assertForbidden();
     }
 
@@ -53,7 +54,8 @@ class UserPermissionsTest extends TestCase
             ->assertSee('href="'.route('timing').'"', false)
             ->assertDontSee('href="'.route('cars').'"', false)
             ->assertDontSee('href="'.route('vmix').'"', false)
-            ->assertDontSee('href="'.route('users').'"', false);
+            ->assertDontSee('href="'.route('users').'"', false)
+            ->assertDontSee('href="'.route('settings').'"', false);
     }
 
     public function test_admins_can_add_a_user_with_a_preset(): void

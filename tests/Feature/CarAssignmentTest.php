@@ -145,6 +145,117 @@ class CarAssignmentTest extends TestCase
         $this->assertSame('99', $assigned[$light->id]);
     }
 
+    public function test_turning_on_alternate_groups_splits_a_ten_car_pool_across_consecutive_races(): void
+    {
+        $type = RaceType::factory()->create(['cars_per_race' => null]);
+        $races = Race::factory()->for($type)->count(3)->sequence(
+            ['sort_order' => 1],
+            ['sort_order' => 2],
+            ['sort_order' => 3],
+        )->create();
+        $cars = collect(range(1, 10))->map(fn (int $number) => Car::factory()->create(['number' => (string) $number]));
+        $this->attachPool($type, $cars->all());
+
+        Livewire::test('pages::lineups')->call('toggleAlternateGroups', $type->id);
+
+        $type->refresh()->load(['cars', 'races']);
+        $this->assertSame(5, $type->cars_per_race);
+        $this->assertSame(['1', '2', '3', '4', '5'], $type->carsForRace($races[0])->pluck('number')->all());
+        $this->assertSame(['6', '7', '8', '9', '10'], $type->carsForRace($races[1])->pluck('number')->all());
+        $this->assertSame(['1', '2', '3', '4', '5'], $type->carsForRace($races[2])->pluck('number')->all());
+        $this->assertNotEquals(
+            $type->carsForRace($races[0])->pluck('id')->all(),
+            $type->carsForRace($races[1])->pluck('id')->all(),
+        );
+    }
+
+    public function test_dealing_the_pool_gives_odd_cars_to_group_one_and_even_to_group_two(): void
+    {
+        $type = RaceType::factory()->create(['cars_per_race' => 5]);
+        $first = Race::factory()->for($type)->create(['sort_order' => 1]);
+        $second = Race::factory()->for($type)->create(['sort_order' => 2]);
+        $cars = collect(range(1, 10))->map(
+            fn (int $number) => Car::factory()->create(['number' => (string) $number, 'time_ms' => $number * 1000]),
+        );
+        $this->attachPool($type, $cars->all());
+
+        Livewire::test('pages::lineups')->call('dealPool', $type->id);
+
+        $type->refresh()->load(['cars', 'races']);
+        $this->assertSame(['1', '3', '5', '7', '9'], $type->carsForRace($first)->pluck('number')->all());
+        $this->assertSame(['2', '4', '6', '8', '10'], $type->carsForRace($second)->pluck('number')->all());
+    }
+
+    public function test_dealing_without_alternate_groups_is_rejected(): void
+    {
+        $type = RaceType::factory()->create(['cars_per_race' => null]);
+        $cars = collect(range(1, 4))->map(fn (int $number) => Car::factory()->create(['number' => (string) $number]));
+        $this->attachPool($type, $cars->all());
+
+        Livewire::test('pages::lineups')
+            ->call('dealPool', $type->id)
+            ->assertDispatched('notify', type: 'error');
+
+        $this->assertSame(['1', '2', '3', '4'], $type->fresh()->cars->pluck('number')->all());
+    }
+
+    public function test_turning_off_alternate_groups_gives_every_race_the_same_cars(): void
+    {
+        $type = RaceType::factory()->create(['cars_per_race' => 5]);
+        $first = Race::factory()->for($type)->create(['sort_order' => 1]);
+        $second = Race::factory()->for($type)->create(['sort_order' => 2]);
+        $cars = collect(range(1, 10))->map(fn (int $number) => Car::factory()->create(['number' => (string) $number]));
+        $this->attachPool($type, $cars->all());
+
+        Livewire::test('pages::lineups')->call('toggleAlternateGroups', $type->id);
+
+        $type->refresh()->load(['cars', 'races']);
+        $this->assertNull($type->cars_per_race);
+        $this->assertSame($cars->pluck('number')->all(), $type->carsForRace($first)->pluck('number')->all());
+        $this->assertSame($cars->pluck('number')->all(), $type->carsForRace($second)->pluck('number')->all());
+    }
+
+    public function test_a_type_cannot_add_more_cars_than_it_allows(): void
+    {
+        $type = RaceType::factory()->create(['cars_allowed' => 2]);
+        [$first, $second, $third] = Car::factory()->count(3)->create();
+
+        Livewire::test('pages::lineups')
+            ->call('togglePoolCar', $type->id, $first->id)
+            ->call('togglePoolCar', $type->id, $second->id)
+            ->call('togglePoolCar', $type->id, $third->id)
+            ->assertDispatched('notify', type: 'error');
+
+        $this->assertSame([$first->id, $second->id], $type->fresh()->cars->pluck('id')->all());
+    }
+
+    public function test_lineups_renders_every_car_in_the_type_pool(): void
+    {
+        $type = RaceType::factory()->create(['name' => 'Heat', 'cars_per_race' => 5, 'cars_allowed' => 10]);
+        $cars = collect(range(1, 10))->map(fn (int $number) => Car::factory()->create(['number' => (string) $number]));
+        $this->attachPool($type, $cars->all());
+
+        $html = Livewire::test('pages::lineups')->html();
+
+        $this->assertStringContainsString('>G1</span>', $html);
+        $this->assertStringContainsString('>G2</span>', $html);
+
+        foreach ($cars as $car) {
+            $this->assertStringContainsString('Remove '.$car->number.' from Heat', $html);
+        }
+    }
+
+    public function test_lineups_can_set_how_many_cars_a_type_allows(): void
+    {
+        $type = RaceType::factory()->create(['cars_allowed' => null]);
+
+        Livewire::test('pages::lineups')
+            ->call('updateCarsAllowed', $type->id, '12')
+            ->assertHasNoErrors();
+
+        $this->assertSame(12, $type->refresh()->cars_allowed);
+    }
+
     public function test_lineups_can_configure_the_pool_and_cars_per_race(): void
     {
         $type = RaceType::factory()->create(['name' => 'Heat', 'cars_per_race' => null]);
@@ -180,11 +291,13 @@ class CarAssignmentTest extends TestCase
         Livewire::test('pages::lineups')
             ->set('newTypeName', 'Heat')
             ->set('newTypeRaceCount', 4)
+            ->set('newTypeCarsAllowed', 10)
             ->set('newTypeCarsPerRace', 5)
             ->call('addRaceType')
             ->assertHasNoErrors();
 
         $type = RaceType::query()->where('name', 'Heat')->first();
+        $this->assertSame(10, $type->cars_allowed);
         $this->assertSame(5, $type->cars_per_race);
         $this->assertSame(4, $type->races()->count());
     }

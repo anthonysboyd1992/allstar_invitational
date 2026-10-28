@@ -1,0 +1,203 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\Car;
+use App\Models\Competitor;
+use App\Models\Race;
+use App\Models\RaceType;
+use App\Models\Setting;
+use App\Models\User;
+use App\Services\MediaStorage;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
+use Livewire\Livewire;
+use Tests\TestCase;
+
+class LineupPrintTest extends TestCase
+{
+    use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->actingAs(User::factory()->create());
+    }
+
+    public function test_printed_lineup_lists_starting_order_hometown_weight_and_kart(): void
+    {
+        $type = RaceType::factory()->create(['name' => 'Heat']);
+        $race = Race::factory()->for($type)->create([
+            'name' => 'Heat Race 1',
+            'sponsor' => 'Move Over Michigan Dirt Late Model Series',
+        ]);
+        $fast = Car::factory()->create(['number' => '1', 'time_ms' => 10000]);
+        $slow = Car::factory()->create(['number' => '5', 'time_ms' => 12000]);
+        $type->cars()->attach($fast->id, ['sort_order' => 0]);
+        $type->cars()->attach($slow->id, ['sort_order' => 1]);
+
+        $heavy = Competitor::factory()->create([
+            'car_number' => '47',
+            'first_name' => 'Collin',
+            'last_name' => 'Thirlby',
+            'hometown' => 'Traverse City, MI',
+            'weight' => 210.0,
+            'accolades' => '2025 WoodTic Champion',
+        ]);
+        $light = Competitor::factory()->create([
+            'car_number' => '45',
+            'first_name' => 'Conner',
+            'last_name' => 'Zbozien',
+            'hometown' => 'St. Clair Shores, MI',
+            'weight' => 160.0,
+            'accolades' => '2024 Flat Rock Speedway Track Champion',
+        ]);
+
+        $race->syncLineup([$light->id, $heavy->id]);
+
+        $this->get(route('lineups.print', ['races' => [$race->id]]))
+            ->assertOk()
+            ->assertSee('MOVE OVER MICHIGAN DIRT LATE MODEL SERIES HEAT RACE 1')
+            ->assertSee('Pos')
+            ->assertSee('Kart Assignment')
+            ->assertSee('Conner Zbozien')
+            ->assertSee('St. Clair Shores, MI')
+            ->assertSee('2024 Flat Rock Speedway Track Champion')
+            ->assertSee('160')
+            ->assertSee('5 SLOWEST')
+            ->assertSee('Collin Thirlby')
+            ->assertSee('1 FAST')
+            ->assertSee('images/letterhead-left.png', false)
+            ->assertSee('images/letterhead-right.png', false)
+            ->assertSee('8.5in 11in')
+            ->assertDontSee('Heat Race 2');
+    }
+
+    public function test_print_without_a_selection_includes_every_race(): void
+    {
+        $heat = RaceType::factory()->create(['name' => 'Heat', 'sort_order' => 1]);
+        $feature = RaceType::factory()->create(['name' => 'Feature', 'sort_order' => 2]);
+        Race::factory()->for($heat)->create(['name' => 'Heat 1']);
+        Race::factory()->for($feature)->create(['name' => 'Feature']);
+
+        $this->get(route('lineups.print'))
+            ->assertOk()
+            ->assertSee('HEAT 1')
+            ->assertSee('FEATURE');
+    }
+
+    public function test_printed_heats_appear_in_numbered_order(): void
+    {
+        $heat = RaceType::factory()->create(['name' => 'Heat', 'sort_order' => 1]);
+        $feature = RaceType::factory()->create(['name' => 'Feature', 'sort_order' => 2]);
+        Race::factory()->for($heat)->create(['name' => 'Heat 5', 'sort_order' => 1]);
+        Race::factory()->for($heat)->create(['name' => 'Heat 10', 'sort_order' => 2]);
+        Race::factory()->for($heat)->create(['name' => 'Heat 2', 'sort_order' => 3]);
+        Race::factory()->for($heat)->create(['name' => 'Heat 1', 'sort_order' => 4]);
+        Race::factory()->for($feature)->create(['name' => 'Feature', 'sort_order' => 1]);
+
+        $this->get(route('lineups.print'))
+            ->assertOk()
+            ->assertSeeInOrder(['<h1>HEAT 1</h1>', '<h1>HEAT 2</h1>', '<h1>HEAT 5</h1>', '<h1>HEAT 10</h1>', '<h1>FEATURE</h1>'], false);
+    }
+
+    public function test_print_picker_lists_heats_in_numbered_order(): void
+    {
+        $heat = RaceType::factory()->create(['name' => 'Heat']);
+        Race::factory()->for($heat)->create(['name' => 'Heat 5', 'sort_order' => 1]);
+        Race::factory()->for($heat)->create(['name' => 'Heat 1', 'sort_order' => 2]);
+        Race::factory()->for($heat)->create(['name' => 'Heat 2', 'sort_order' => 3]);
+
+        Livewire::test('pages::lineups')
+            ->call('openPrintPicker', $heat->id)
+            ->assertSeeInOrder(['Heat 1', 'Heat 2', 'Heat 5']);
+    }
+
+    public function test_printed_lineups_use_uploaded_letterhead_logos(): void
+    {
+        Storage::fake('public');
+        Setting::replaceLetterhead('left', UploadedFile::fake()->image('left.png', 80, 40));
+        Setting::replaceLetterhead('right', UploadedFile::fake()->image('right.png', 80, 40));
+
+        $this->get(route('lineups.print'))
+            ->assertOk()
+            ->assertSee(MediaStorage::url(Setting::letterheadPath('left')), false)
+            ->assertSee(MediaStorage::url(Setting::letterheadPath('right')), false)
+            ->assertDontSee('images/letterhead-left.png', false);
+    }
+
+    public function test_print_only_includes_the_selected_races(): void
+    {
+        $type = RaceType::factory()->create();
+        $first = Race::factory()->for($type)->create(['name' => 'Heat 1', 'sort_order' => 1]);
+        Race::factory()->for($type)->create(['name' => 'Heat 2', 'sort_order' => 2]);
+
+        $this->get(route('lineups.print', ['races' => [$first->id]]))
+            ->assertOk()
+            ->assertSee('HEAT 1')
+            ->assertDontSee('HEAT 2');
+    }
+
+    public function test_unknown_race_ids_are_rejected(): void
+    {
+        $this->get(route('lineups.print', ['races' => [999]]))
+            ->assertSessionHasErrors('races.0');
+    }
+
+    public function test_print_picker_preselects_races_in_the_current_type(): void
+    {
+        $heat = RaceType::factory()->create(['name' => 'Heat']);
+        $feature = RaceType::factory()->create(['name' => 'Feature']);
+        $heatRace = Race::factory()->for($heat)->create();
+        Race::factory()->for($feature)->create();
+
+        Livewire::test('pages::lineups')
+            ->call('openPrintPicker', $heat->id)
+            ->assertSet('printPickerOpen', true)
+            ->assertSet('printRaceIds', [(string) $heatRace->id])
+            ->assertSee('Print selected');
+    }
+
+    public function test_choosing_a_race_enables_print_with_only_that_race_in_the_url(): void
+    {
+        $heat = RaceType::factory()->create(['name' => 'Heat']);
+        $feature = RaceType::factory()->create(['name' => 'Feature']);
+        $heat1 = Race::factory()->for($heat)->create(['name' => 'Heat 1']);
+        $heat2 = Race::factory()->for($heat)->create(['name' => 'Heat 2']);
+        Race::factory()->for($feature)->create(['name' => 'Feature']);
+
+        $url = route('lineups.print', ['races' => [$heat1->id]]);
+
+        Livewire::test('pages::lineups')
+            ->call('openPrintPicker')
+            ->call('clearPrintRaces')
+            ->assertSet('printRaceIds', [])
+            ->assertSee('pointer-events-none', false)
+            ->assertDontSee($url, false)
+            ->set('printRaceIds', [(string) $heat1->id])
+            ->assertDontSee('pointer-events-none', false)
+            ->assertSee($url, false);
+
+        $this->get($url)
+            ->assertOk()
+            ->assertSee('HEAT 1')
+            ->assertDontSee('HEAT 2')
+            ->assertDontSee('FEATURE');
+    }
+
+    public function test_guests_are_sent_to_the_login_page(): void
+    {
+        auth()->logout();
+
+        $this->get(route('lineups.print'))->assertRedirect(route('login'));
+    }
+
+    public function test_timing_accounts_cannot_print_lineups(): void
+    {
+        $this->actingAs(User::factory()->withAreas(User::Presets['timing']['areas'])->create());
+
+        $this->get(route('lineups.print'))->assertForbidden();
+    }
+}

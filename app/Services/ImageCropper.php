@@ -24,6 +24,20 @@ class ImageCropper
     }
 
     /**
+     * Re-encode as PNG, shrinking so the longest edge is at most $maxEdge.
+     *
+     * @return string the stored path
+     */
+    public function storePng(string $sourcePath, string $directory, string $disk = 'public', int $maxEdge = 1600): string
+    {
+        $path = trim($directory, '/').'/'.Str::random(40).'.png';
+
+        Storage::disk($disk)->put($path, $this->png($this->fit($sourcePath, $maxEdge)));
+
+        return $path;
+    }
+
+    /**
      * @return string PNG bytes
      */
     public function cover(string $sourcePath, int $width, int $height): string
@@ -62,8 +76,34 @@ class ImageCropper
         return $canvas;
     }
 
+    /**
+     * Scale down when the longest edge is over $maxEdge; otherwise return the original pixels.
+     */
+    private function fit(string $sourcePath, int $maxEdge): GdImage
+    {
+        $source = $this->load($sourcePath);
+        $width = imagesx($source);
+        $height = imagesy($source);
+        $edge = max($width, $height);
+
+        if ($edge <= $maxEdge) {
+            return $source;
+        }
+
+        $scale = $maxEdge / $edge;
+        $newWidth = max(1, (int) round($width * $scale));
+        $newHeight = max(1, (int) round($height * $scale));
+        $canvas = $this->transparentCanvas($newWidth, $newHeight);
+        imagealphablending($canvas, true);
+        imagecopyresampled($canvas, $source, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
+        imagesavealpha($canvas, true);
+
+        return $canvas;
+    }
+
     private function png(GdImage $image): string
     {
+        imagesavealpha($image, true);
         ob_start();
         imagepng($image, null, 6);
 

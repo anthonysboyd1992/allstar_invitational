@@ -163,6 +163,39 @@ class Car extends Model
         return $seconds.'.'.$fraction;
     }
 
+    /**
+     * FAST / MID FAST / MID / SLOWER / SLOWEST for a 0-based rank in a group of $count cars.
+     */
+    public static function speedLabel(int $rank, int $count): string
+    {
+        if ($count <= 1 || $rank <= 0) {
+            return 'FAST';
+        }
+
+        if ($rank >= $count - 1) {
+            return 'SLOWEST';
+        }
+
+        $labels = match ($count) {
+            3 => ['FAST', 'MID', 'SLOWEST'],
+            4 => ['FAST', 'MID FAST', 'SLOWER', 'SLOWEST'],
+            5 => ['FAST', 'MID FAST', 'MID', 'SLOWER', 'SLOWEST'],
+            default => null,
+        };
+
+        if ($labels !== null) {
+            return $labels[$rank];
+        }
+
+        $ratio = $rank / ($count - 1);
+
+        return match (true) {
+            $ratio < 0.34 => 'MID FAST',
+            $ratio < 0.67 => 'MID',
+            default => 'SLOWER',
+        };
+    }
+
     public function formattedTime(): string
     {
         return static::formatTime($this->time_ms);

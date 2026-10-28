@@ -16,7 +16,7 @@ class AuthenticationTest extends TestCase
     {
         $race = Race::factory()->create();
 
-        foreach ([route('competitors'), route('lineups'), route('vmix'), route('exports.transponders', $race), route('exports.laps', $race)] as $url) {
+        foreach ([route('competitors'), route('lineups'), route('lineups.print'), route('vmix'), route('settings'), route('exports.transponders', $race), route('exports.laps', $race)] as $url) {
             $this->get($url)->assertRedirect(route('login'));
         }
     }

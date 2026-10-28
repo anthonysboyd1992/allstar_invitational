@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\HomeController;
+use App\Http\Controllers\LineupPrintController;
 use App\Http\Controllers\LogoutController;
 use App\Http\Controllers\TransponderExportController;
 use App\Http\Controllers\VmixFeedController;
@@ -13,9 +14,13 @@ Route::middleware('auth')->group(function () {
 
     Route::livewire('/competitors', 'pages::competitors')->middleware('can:access-competitors')->name('competitors');
     Route::livewire('/cars', 'pages::cars')->middleware('can:access-cars')->name('cars');
-    Route::livewire('/lineups', 'pages::lineups')->middleware('can:access-lineups')->name('lineups');
+    Route::middleware('can:access-lineups')->group(function () {
+        Route::livewire('/lineups', 'pages::lineups')->name('lineups');
+        Route::get('/lineups/print', LineupPrintController::class)->name('lineups.print');
+    });
     Route::livewire('/vmix', 'pages::vmix')->middleware('can:access-vmix')->name('vmix');
     Route::livewire('/vmix-data', 'pages::vmix-data')->middleware('can:access-vmix-data')->name('vmix-data');
+    Route::livewire('/settings', 'pages::settings')->middleware('can:access-settings')->name('settings');
     Route::livewire('/users', 'pages::users')->middleware('can:access-users')->name('users');
 
     Route::middleware('can:access-timing')->group(function () {

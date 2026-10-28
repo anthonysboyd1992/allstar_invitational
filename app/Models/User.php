@@ -27,6 +27,7 @@ class User extends Authenticatable
         'timing' => 'Timing',
         'vmix' => 'vMix',
         'vmix-data' => 'vMix Data',
+        'settings' => 'Settings',
         'users' => 'Users',
     ];
 
@@ -36,7 +37,7 @@ class User extends Authenticatable
      * @var array<string, array{label: string, areas: list<string>}>
      */
     public const Presets = [
-        'everything' => ['label' => 'Everything', 'areas' => ['competitors', 'cars', 'lineups', 'timing', 'vmix', 'vmix-data', 'users']],
+        'everything' => ['label' => 'Everything', 'areas' => ['competitors', 'cars', 'lineups', 'timing', 'vmix', 'vmix-data', 'settings', 'users']],
         'timing' => ['label' => 'Timing', 'areas' => ['timing']],
         'vmix' => ['label' => 'vMix', 'areas' => ['vmix', 'vmix-data']],
     ];

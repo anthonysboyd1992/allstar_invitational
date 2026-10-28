@@ -78,6 +78,67 @@ class Race extends Model
     }
 
     /**
+     * 1-based pool group this race uses when the type splits its cars.
+     */
+    public function poolGroupNumber(): int
+    {
+        $this->loadMissing(['raceType.cars', 'raceType.races']);
+
+        return $this->raceType->groupNumberFor($this);
+    }
+
+    /**
+     * Heat 1, Heat 2, … Heat 10 within each type, in the type's program order.
+     *
+     * @param  Collection<int, Race>  $races
+     * @return Collection<int, Race>
+     */
+    public static function inProgramOrder(Collection $races): Collection
+    {
+        return $races
+            ->sort(function (Race $a, Race $b): int {
+                $aType = $a->raceType;
+                $bType = $b->raceType;
+
+                return $aType->sort_order <=> $bType->sort_order
+                    ?: $aType->id <=> $bType->id
+                    ?: strnatcasecmp($a->name, $b->name)
+                    ?: $a->sort_order <=> $b->sort_order
+                    ?: $a->id <=> $b->id;
+            })
+            ->values();
+    }
+
+    /**
+     * Sponsor plus race name, the way it prints on a heat sheet.
+     */
+    public function printedTitle(): string
+    {
+        return strtoupper(trim(collect([$this->sponsor, $this->name])->filter()->implode(' ')));
+    }
+
+    /**
+     * Assigned invitational car and its speed rank in this race's group, e.g. "1 FAST".
+     */
+    public function kartAssignment(RaceEntry $entry): string
+    {
+        $car = $entry->car;
+
+        if ($car === null) {
+            return '';
+        }
+
+        $cars = Car::sortFastestFirst($this->poolCars());
+        $rank = $cars->search(fn (Car $item) => $item->id === $car->id);
+
+        if ($rank === false) {
+            return $car->number;
+        }
+
+        return trim($car->number.' '.Car::speedLabel($rank, $cars->count()));
+    }
+
+    /**
      * Pair drivers in this race: heaviest to the fastest car from the type's group for this race.
      */
     public function assignCarsByWeight(): void
