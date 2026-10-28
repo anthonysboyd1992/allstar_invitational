@@ -23,6 +23,11 @@ class Setting extends Model
      */
     public const ShowCurrentItem = 'vmix_show_current_item';
 
+    /**
+     * How the cars page is ordered: number, time, or manual (drag).
+     */
+    public const CarsSort = 'cars_sort';
+
     public const DefaultDriversPerDataset = 12;
 
     public const MaxDriversPerDataset = 50;

@@ -21,7 +21,7 @@ class UserPermissionsTest extends TestCase
         $this->get(route('timing'))->assertOk();
         $this->get(route('exports.transponders', $race))->assertOk();
 
-        foreach (['competitors', 'lineups', 'vmix', 'vmix-data', 'users'] as $routeName) {
+        foreach (['competitors', 'cars', 'lineups', 'vmix', 'vmix-data', 'users'] as $routeName) {
             $this->get(route($routeName))->assertForbidden();
         }
     }
@@ -51,6 +51,7 @@ class UserPermissionsTest extends TestCase
 
         $this->get(route('timing'))
             ->assertSee('href="'.route('timing').'"', false)
+            ->assertDontSee('href="'.route('cars').'"', false)
             ->assertDontSee('href="'.route('vmix').'"', false)
             ->assertDontSee('href="'.route('users').'"', false);
     }

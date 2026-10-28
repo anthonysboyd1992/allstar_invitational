@@ -15,9 +15,14 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        User::query()->firstOrCreate(
+        $admin = User::query()->firstOrCreate(
             ['email' => 'admin@allstar.test'],
             ['name' => 'Admin', 'password' => 'password', 'permissions' => User::Presets['everything']['areas']],
         );
+
+        if (app()->environment('local')) {
+            $admin->update(['permissions' => User::Presets['everything']['areas']]);
+            $this->call(CarSeeder::class);
+        }
     }
 }

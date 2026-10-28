@@ -12,6 +12,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/', HomeController::class)->name('home');
 
     Route::livewire('/competitors', 'pages::competitors')->middleware('can:access-competitors')->name('competitors');
+    Route::livewire('/cars', 'pages::cars')->middleware('can:access-cars')->name('cars');
     Route::livewire('/lineups', 'pages::lineups')->middleware('can:access-lineups')->name('lineups');
     Route::livewire('/vmix', 'pages::vmix')->middleware('can:access-vmix')->name('vmix');
     Route::livewire('/vmix-data', 'pages::vmix-data')->middleware('can:access-vmix-data')->name('vmix-data');
