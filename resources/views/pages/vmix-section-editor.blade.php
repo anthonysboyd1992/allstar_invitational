@@ -9,7 +9,18 @@
                             class="mt-0.5 block w-56 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-lg font-black focus:border-amber-500 focus:outline-none"
                         >
                     </label>
+                    @include('pages.vmix-duration-fields', ['label' => 'Allotted', 'minutes' => 'allottedMinutes', 'seconds' => 'allottedExtraSeconds', 'blur' => true])
+                    <span class="pb-2 font-mono text-sm text-slate-500">= {{ \App\Models\VmixSection::formatSeconds($section->allottedSeconds()) }}</span>
                     <div class="flex-1"></div>
+                    <button
+                        type="button"
+                        wire:click="goLive({{ $section->id }})"
+                        @class([
+                            'rounded-md px-4 py-2 text-sm font-black',
+                            'bg-red-600 text-white hover:bg-red-500' => $this->currentItemId === $section->id,
+                            'bg-slate-200 text-slate-600 hover:bg-slate-300' => $this->currentItemId !== $section->id,
+                        ])
+                    >{{ $this->currentItemId === $section->id ? 'Running' : 'Start timer' }}</button>
                     <button
                         type="button"
                         wire:click="deleteSection"
@@ -18,7 +29,7 @@
                     >Delete placeholder</button>
                 </div>
                 @include('pages.vmix-description-editor')
-                <p class="mt-3 border-t border-slate-200 pt-3 text-xs text-slate-400">This is a slot in the run of show with no data fields. It is not in the vMix master file. Use it as a reminder, then add a real item or section when you have the values.</p>
+                <p class="mt-3 border-t border-slate-200 pt-3 text-xs text-slate-400">This is a slot in the run of show with no data fields. It is not in the vMix master file. Use it as a reminder or as a timer. Allotted time starts when it becomes current (1:00 if you leave it blank) and moves the show to the next entry when it runs out.</p>
             </div>
         @elseif ($section->isBreak())
             <div class="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
@@ -31,18 +42,8 @@
                             class="mt-0.5 block w-56 rounded-md border border-slate-300 px-2 py-1.5 text-lg font-black focus:border-amber-500 focus:outline-none"
                         >
                     </label>
-                    <label class="block">
-                        <span class="text-xs font-semibold text-slate-500">Length (seconds)</span>
-                        <input
-                            type="number"
-                            min="1"
-                            max="86400"
-                            wire:model.blur="breakSeconds"
-                            x-on:keydown.enter.prevent="$el.blur()"
-                            class="mt-0.5 block w-28 rounded-md border border-slate-300 px-2 py-2 text-right font-mono text-sm focus:border-amber-500 focus:outline-none"
-                        >
-                    </label>
-                    <span class="pb-2 font-mono text-sm text-slate-500">= {{ \App\Models\VmixSection::formatSeconds($section->break_seconds) }}</span>
+                    @include('pages.vmix-duration-fields', ['label' => 'Length', 'minutes' => 'allottedMinutes', 'seconds' => 'allottedExtraSeconds', 'blur' => true])
+                    <span class="pb-2 font-mono text-sm text-slate-500">= {{ \App\Models\VmixSection::formatSeconds($section->allottedSeconds()) }}</span>
 
                     <div class="flex-1"></div>
 
@@ -63,7 +64,7 @@
                     >Delete break</button>
                 </div>
                 @include('pages.vmix-description-editor')
-                <p class="mt-3 border-t border-slate-100 pt-3 text-xs text-slate-400">The countdown starts when the break goes on, from Start break or Next in the run of show, and shows at the top of this page. When it reaches zero the break ends and the next run-of-show entry goes on air if it isn't already. Breaks are not in the vMix master file.</p>
+                <p class="mt-3 border-t border-slate-100 pt-3 text-xs text-slate-400">The countdown starts when the break becomes current, from Start break or Next in the run of show, and shows at the top of this page. When it reaches zero the next run-of-show entry goes on. Breaks are not in the vMix master file.</p>
             </div>
         @else
             @php($isTemplate = $section->isTemplate())
@@ -94,6 +95,10 @@
                             &middot; feeds <code class="rounded bg-slate-100 px-1 font-mono text-xs">{{ $section->template->key }}</code>
                         </div>
                     @endif
+                    @unless ($isTemplate)
+                        @include('pages.vmix-duration-fields', ['label' => 'Allotted', 'minutes' => 'allottedMinutes', 'seconds' => 'allottedExtraSeconds', 'blur' => true])
+                        <span class="pb-2 font-mono text-sm text-slate-500">= {{ \App\Models\VmixSection::formatSeconds($section->allottedSeconds()) }}</span>
+                    @endunless
 
                     <div class="flex-1"></div>
 
@@ -142,7 +147,7 @@
                         </p>
                     </form>
                 @else
-                    <p class="mt-3 border-t border-slate-100 pt-3 text-xs text-slate-400">Fill in this item's values. To add or change fields, edit the <span class="font-semibold">{{ $section->template->name }}</span> template.</p>
+                    <p class="mt-3 border-t border-slate-100 pt-3 text-xs text-slate-400">Fill in this item's values. To add or change fields, edit the <span class="font-semibold">{{ $section->template->name }}</span> template. Allotted time starts when this item becomes current (1:00 if you leave it blank) and moves the show to the next entry when it runs out.</p>
                 @endif
             </div>
 

@@ -22,7 +22,7 @@ class UserPermissionsTest extends TestCase
         $this->get(route('exports.transponders', $race))->assertOk();
         $this->get(route('exports.type-transponders', $race->raceType))->assertOk();
 
-        foreach (['competitors', 'cars', 'lineups', 'vmix', 'vmix-data', 'settings', 'users'] as $routeName) {
+        foreach (['competitors', 'cars', 'lineups', 'results', 'vmix', 'vmix-data', 'settings', 'users'] as $routeName) {
             $this->get(route($routeName))->assertForbidden();
         }
     }
@@ -68,6 +68,20 @@ class UserPermissionsTest extends TestCase
 
         $this->assertSame(
             ['competitors', 'cars', 'lineups', 'settings', 'users'],
+            $operator->fresh()->permissions,
+        );
+        $this->assertSame(['timing'], $timing->fresh()->permissions);
+    }
+
+    public function test_existing_lineup_operators_gain_results_access(): void
+    {
+        $operator = User::factory()->withAreas(['competitors', 'lineups', 'settings', 'users'])->create();
+        $timing = User::factory()->withAreas(['timing'])->create();
+
+        (require database_path('migrations/2026_10_28_180047_add_results_area_to_existing_users.php'))->up();
+
+        $this->assertSame(
+            ['competitors', 'lineups', 'results', 'settings', 'users'],
             $operator->fresh()->permissions,
         );
         $this->assertSame(['timing'], $timing->fresh()->permissions);

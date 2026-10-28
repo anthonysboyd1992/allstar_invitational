@@ -33,8 +33,8 @@ class LineupPrintController extends Controller
             'blocks' => $blocks,
             'sheetColumns' => max(6, (int) $blocks->max('columns')),
             'title' => $races->count() === 1 ? $races->first()->printedTitle() : 'Lineups',
-            'leftLogoUrl' => Setting::letterheadUrl('left'),
-            'rightLogoUrl' => Setting::letterheadUrl('right'),
+            'printKind' => 'Lineups',
+            ...Setting::printLetterhead(),
         ]);
     }
 }

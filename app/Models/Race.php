@@ -107,6 +107,136 @@ class Race extends Model
     }
 
     /**
+     * Next empty starting spot at or after $start. A start slot does not wrap back to 1.
+     */
+    public function nextOpenSlotFrom(?int $start): ?int
+    {
+        $this->loadMissing('entries');
+
+        if (! $this->hasFixedField()) {
+            return $this->entries->count() + 1;
+        }
+
+        $taken = $this->entries->pluck('start_position')->all();
+        $from = $start && $start > 0 ? $start : 1;
+
+        foreach (range($from, $this->slotCount()) as $slot) {
+            if (! in_array($slot, $taken, true)) {
+                return $slot;
+            }
+        }
+
+        if ($start && $start > 1) {
+            return null;
+        }
+
+        return $this->firstOpenSlot();
+    }
+
+    /**
+     * Seat a transferred driver. Occupied spots are left alone.
+     */
+    public function placeTransfer(int $competitorId, int $slot, int $sourceRaceId): bool
+    {
+        $this->loadMissing('entries');
+
+        if ($this->entries->contains(fn (RaceEntry $entry): bool => $entry->competitor_id === $competitorId)) {
+            return false;
+        }
+
+        $slot = max(1, $slot);
+
+        if ($this->hasFixedField()) {
+            $slot = min($slot, $this->slotCount());
+        }
+
+        if ($this->entries->contains(fn (RaceEntry $entry): bool => $entry->start_position === $slot)) {
+            return false;
+        }
+
+        $this->entries()->create([
+            'competitor_id' => $competitorId,
+            'start_position' => $slot,
+            'source_race_id' => $sourceRaceId,
+        ]);
+
+        $this->unsetRelation('entries');
+        $this->assignCarsByWeight();
+
+        return true;
+    }
+
+    /**
+     * Drop lineup seats this source type previously calculated onto this race.
+     *
+     * @param  list<int>  $sourceRaceIds
+     */
+    public function removeTransfersFrom(array $sourceRaceIds): void
+    {
+        if ($sourceRaceIds === []) {
+            return;
+        }
+
+        $this->entries()->whereIn('source_race_id', $sourceRaceIds)->delete();
+        $this->unsetRelation('entries');
+
+        if (! $this->hasFixedField()) {
+            $this->load('entries');
+            foreach ($this->entries->values() as $index => $entry) {
+                $entry->update(['start_position' => $index + 1]);
+            }
+            $this->unsetRelation('entries');
+        }
+
+        $this->assignCarsByWeight();
+    }
+
+    /**
+     * Drivers still waiting to be clicked into finish order.
+     *
+     * @return Collection<int, RaceEntry>
+     */
+    public function unscoredEntries(): Collection
+    {
+        $this->loadMissing('entries.competitor');
+
+        return $this->entries
+            ->filter(fn (RaceEntry $entry): bool => $entry->finish_position === null)
+            ->sortBy('start_position')
+            ->values();
+    }
+
+    /**
+     * Drivers already placed in finish order.
+     *
+     * @return Collection<int, RaceEntry>
+     */
+    public function scoredEntries(): Collection
+    {
+        $this->loadMissing('entries.competitor');
+
+        return $this->entries
+            ->filter(fn (RaceEntry $entry): bool => $entry->finish_position !== null)
+            ->sortBy('finish_position')
+            ->values();
+    }
+
+    /**
+     * Finish order with transfer labels for the Results board.
+     *
+     * @return Collection<int, array{entry: RaceEntry, transfer: ?string}>
+     */
+    public function scoredResultRows(): Collection
+    {
+        $this->loadMissing(['entries.competitor', 'raceType.transferRules.destination.races', 'raceType.races.entries']);
+
+        return $this->scoredEntries()->map(fn (RaceEntry $entry): array => [
+            'entry' => $entry,
+            'transfer' => $this->raceType->transferLabelFor($entry),
+        ]);
+    }
+
+    /**
      * Grid of starting spots. Empty spots stay empty until a driver is placed there.
      *
      * @return Collection<int, array{position: int, entry: ?RaceEntry}>
@@ -271,19 +401,63 @@ class Race extends Model
     /**
      * Printable tables for this race. Each race prints as its own group, including empty starting spots.
      *
-     * @return Collection<int, array{title: string, slots: Collection<int, array{position: int, entry: ?RaceEntry}>, race: Race, show_pill: bool, columns: int}>
+     * @return Collection<int, array{title: string, slots: Collection<int, array{position: int, entry: ?RaceEntry, transfer: ?string}>, race: Race, show_pill: bool, show_weight: bool, show_transfer: bool, columns: int}>
      */
     public function printedLineupBlocks(): Collection
     {
-        $this->loadMissing(['entries.competitor', 'entries.car', 'raceType']);
-        $showPill = (bool) $this->raceType->assigns_by_pill;
+        return $this->printedSheetBlocks(showWeight: false, showTransfer: false);
+    }
+
+    /**
+     * Finish order with transfer destinations and charge (start minus finish).
+     *
+     * @return Collection<int, array{title: string, slots: Collection<int, array{position: int, entry: ?RaceEntry, transfer: ?string}>, race: Race, show_pill: bool, show_weight: bool, show_transfer: bool, columns: int}>
+     */
+    public function printedResultBlocks(): Collection
+    {
+        $this->loadMissing(['entries.competitor', 'entries.car', 'raceType.transferRules.destination.races', 'raceType.races.entries']);
+        $slots = $this->entries
+            ->filter(fn (RaceEntry $entry): bool => $entry->finish_position !== null)
+            ->sortBy('finish_position')
+            ->values()
+            ->map(fn (RaceEntry $entry): array => [
+                'position' => (int) $entry->finish_position,
+                'entry' => $entry,
+                'transfer' => $this->raceType->transferLabelFor($entry),
+            ]);
 
         return collect([[
             'title' => $this->printedTitle(),
-            'slots' => $this->lineupSlots(),
+            'slots' => $slots,
+            'race' => $this,
+            'show_pill' => false,
+            'show_weight' => false,
+            'show_transfer' => true,
+            'columns' => 8,
+        ]]);
+    }
+
+    /**
+     * @return Collection<int, array{title: string, slots: Collection<int, array{position: int, entry: ?RaceEntry, transfer: ?string}>, race: Race, show_pill: bool, show_weight: bool, show_transfer: bool, columns: int}>
+     */
+    private function printedSheetBlocks(bool $showWeight, bool $showTransfer): Collection
+    {
+        $this->loadMissing(['entries.competitor', 'entries.car', 'raceType']);
+        $showPill = (bool) $this->raceType->assigns_by_pill;
+        $slots = $this->lineupSlots()->map(fn (array $slot): array => [
+            'position' => $slot['position'],
+            'entry' => $slot['entry'],
+            'transfer' => null,
+        ]);
+
+        return collect([[
+            'title' => $this->printedTitle(),
+            'slots' => $slots,
             'race' => $this,
             'show_pill' => $showPill,
-            'columns' => $showPill ? 7 : 6,
+            'show_weight' => $showWeight,
+            'show_transfer' => $showTransfer,
+            'columns' => ($showPill ? 7 : 6) + ($showWeight ? 1 : 0) + ($showTransfer ? 1 : 0),
         ]]);
     }
 

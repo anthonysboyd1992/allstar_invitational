@@ -18,8 +18,9 @@ use Illuminate\Support\Str;
  * A standalone section (neither) has its own structure, values and key in the master file.
  * A break (break_seconds set) is a run-of-show entry that counts down on the operator screen and is not in the master file.
  * A placeholder (is_placeholder) is a named run-of-show slot with no fields; it is not in the master file.
+ * Allotted seconds start counting when the entry becomes current and advance the show when they run out.
  */
-#[Fillable(['template_id', 'is_template', 'is_placeholder', 'name', 'description', 'key', 'on_air', 'on_air_at', 'sort_order', 'show_order', 'break_seconds'])]
+#[Fillable(['template_id', 'is_template', 'is_placeholder', 'name', 'description', 'key', 'on_air', 'on_air_at', 'sort_order', 'show_order', 'break_seconds', 'allotted_seconds'])]
 class VmixSection extends Model
 {
     /** @use HasFactory<VmixSectionFactory> */
@@ -28,6 +29,8 @@ class VmixSection extends Model
     public const DescriptionLineMax = 200;
 
     public const DescriptionLineLimit = 20;
+
+    public const DefaultAllottedSeconds = 60;
 
     /**
      * @return array<string, string>
@@ -40,6 +43,7 @@ class VmixSection extends Model
             'on_air' => 'boolean',
             'on_air_at' => 'datetime',
             'break_seconds' => 'integer',
+            'allotted_seconds' => 'integer',
         ];
     }
 
@@ -132,24 +136,90 @@ class VmixSection extends Model
     }
 
     /**
+     * Seconds this entry should stay current. Breaks use their length; anything else without a time is 60 seconds.
+     */
+    public function allottedSeconds(): int
+    {
+        return $this->allotted_seconds ?? $this->break_seconds ?? self::DefaultAllottedSeconds;
+    }
+
+    /**
+     * @return array{minutes: int, seconds: int}
+     */
+    public static function splitSeconds(int $total): array
+    {
+        return [
+            'minutes' => intdiv($total, 60),
+            'seconds' => $total % 60,
+        ];
+    }
+
+    /**
+     * When the current entry's allotted countdown reaches zero.
+     */
+    public function timerEndsAt(): ?CarbonInterface
+    {
+        return $this->on_air_at ? $this->on_air_at->copy()->addSeconds($this->allottedSeconds()) : null;
+    }
+
+    /**
      * When an on-air break's countdown reaches zero.
      */
     public function breakEndsAt(): ?CarbonInterface
     {
-        return $this->isBreak() && $this->on_air && $this->on_air_at ? $this->on_air_at->copy()->addSeconds($this->break_seconds) : null;
+        return $this->isBreak() && $this->on_air ? $this->timerEndsAt() : null;
+    }
+
+    public function timerHasEnded(): bool
+    {
+        return $this->timerEndsAt()?->lessThanOrEqualTo(now()) ?? false;
     }
 
     /**
-     * Take every on-air break whose countdown has run out off air, and put the run-of-show entry after it on air
-     * (if it isn't already) as the current entry.
+     * Stamp the allotted countdown. Placeholders stay off air; everything else goes on air.
+     */
+    public function startAllottedTimer(): void
+    {
+        if ($this->isPlaceholder()) {
+            $this->update(['on_air_at' => now()]);
+
+            return;
+        }
+
+        $this->putOnAir();
+    }
+
+    /**
+     * Advance the current run-of-show entry when its allotted time has run out, and put the next entry on.
      */
     public static function finishExpiredBreaks(): void
     {
+        for ($step = 0; $step < 50; $step++) {
+            $currentId = Setting::get(Setting::ShowCurrentItem);
+            $current = $currentId ? static::query()->find((int) $currentId) : null;
+
+            if (! $current?->isInRunOfShow() || ! $current->timerHasEnded()) {
+                break;
+            }
+
+            $entries = static::query()->runOfShow()->get()->values();
+            $index = $entries->search(fn (VmixSection $entry): bool => $entry->id === $current->id);
+            $next = $index === false ? null : $entries->get($index + 1);
+
+            if (! $next) {
+                $current->update(['on_air_at' => null]);
+
+                return;
+            }
+
+            static::advanceCurrentTo($next, $current);
+        }
+
         $expired = static::query()
             ->whereNotNull('break_seconds')
             ->where('on_air', true)
             ->get()
-            ->filter(fn (VmixSection $break) => $break->breakEndsAt()?->lessThanOrEqualTo(now()));
+            ->filter(fn (VmixSection $break): bool => $break->breakEndsAt()?->lessThanOrEqualTo(now()) ?? false);
 
         foreach ($expired as $break) {
             if (! static::query()->whereKey($break->id)->where('on_air', true)->update(['on_air' => false]) || ! $break->isInRunOfShow()) {
@@ -157,16 +227,26 @@ class VmixSection extends Model
             }
 
             $entries = static::query()->runOfShow()->get()->values();
-            $next = $entries->get($entries->search(fn (VmixSection $entry) => $entry->id === $break->id) + 1);
+            $next = $entries->get($entries->search(fn (VmixSection $entry): bool => $entry->id === $break->id) + 1);
 
             if ($next) {
-                if (! $next->isPlaceholder() && ! $next->on_air) {
-                    $next->putOnAir();
-                }
-
-                Setting::put(Setting::ShowCurrentItem, (string) $next->id);
+                static::advanceCurrentTo($next, $break);
             }
         }
+    }
+
+    /**
+     * Make this entry current. Template items and breaks that were current go off air; standalone sections stay live.
+     */
+    public static function advanceCurrentTo(VmixSection $next, ?VmixSection $current): void
+    {
+        if ($current && $current->id !== $next->id && ($current->isItem() || $current->isBreak())) {
+            static::query()->whereKey($current->id)->update(['on_air' => false]);
+            $current->on_air = false;
+        }
+
+        $next->startAllottedTimer();
+        Setting::put(Setting::ShowCurrentItem, (string) $next->id);
     }
 
     /**
@@ -192,6 +272,7 @@ class VmixSection extends Model
             'name' => "Break {$number}",
             'key' => static::uniqueKeyFor("Break {$number}"),
             'break_seconds' => $seconds,
+            'allotted_seconds' => $seconds,
             'show_order' => static::nextShowOrder(),
         ]);
     }
@@ -199,12 +280,13 @@ class VmixSection extends Model
     /**
      * Add a named slot to the end of the run of show, with no fields.
      */
-    public static function createPlaceholder(string $name): VmixSection
+    public static function createPlaceholder(string $name, ?int $seconds = null): VmixSection
     {
         return static::query()->create([
             'is_placeholder' => true,
             'name' => $name,
             'key' => static::uniqueKeyFor($name),
+            'allotted_seconds' => $seconds,
             'show_order' => static::nextShowOrder(),
         ]);
     }
@@ -228,12 +310,14 @@ class VmixSection extends Model
      */
     public function runOfShowLabel(): string
     {
-        return match (true) {
+        $kind = match (true) {
             $this->isItem() => $this->template->name,
-            $this->isBreak() => 'Break · '.static::formatSeconds($this->break_seconds),
+            $this->isBreak() => 'Break',
             $this->isPlaceholder() => 'Placeholder',
             default => 'Section · stays live',
         };
+
+        return $kind.' · '.static::formatSeconds($this->allottedSeconds());
     }
 
     public function isInRunOfShow(): bool

@@ -21,10 +21,15 @@
             .sheet-pages { width: 100%; border-collapse: collapse; }
             .sheet-pages > thead { display: table-header-group; }
             .sheet-pages > thead > tr > td { width: 100%; padding: 0 0 10px; background: #fff; border: 0; color: inherit; }
-            .letterhead { display: flex; align-items: center; gap: 12px; width: 100%; }
-            .letterhead img { display: block; width: auto; object-fit: contain; }
-            .letterhead-left { height: 1.25in; max-width: 5in; flex: 1 1 auto; object-position: left center; }
-            .letterhead-right { height: 0.7in; max-width: 2.8in; flex: 0 0 auto; margin-left: auto; object-position: right center; }
+            .letterhead { position: relative; display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 1.5in; }
+            .letterhead img { position: relative; z-index: 1; display: block; width: auto; object-fit: contain; }
+            .letterhead-left { height: 1.25in; max-width: 3.1in; object-position: left center; }
+            .letterhead-right { height: 0.7in; max-width: 2.4in; object-position: right center; }
+            .letterhead-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: max-content; text-align: center; z-index: 0; }
+            .letterhead-kind { margin: 0 0 10px; font-size: 22px; font-weight: 900; letter-spacing: 0.08em; color: #ee6426; text-transform: uppercase; white-space: nowrap; }
+            .letterhead-heading { margin: 0 0 10px; font-size: 14px; font-weight: 900; letter-spacing: 0.01em; line-height: 1.2; text-transform: uppercase; white-space: nowrap; }
+            .letterhead-date, .letterhead-venue, .letterhead-venue-name { margin: 8px 0 0; font-size: 12px; font-weight: 600; color: #334155; white-space: nowrap; }
+            .letterhead-venue-name { font-weight: 800; }
             .race-block, .race-block tr {
                 break-inside: avoid;
                 page-break-inside: avoid;
@@ -77,10 +82,7 @@
                 <thead>
                     <tr>
                         <td colspan="{{ $sheetColumns }}">
-                            <header class="letterhead">
-                                <img class="letterhead-left" src="{{ $leftLogoUrl }}" alt="Left letterhead">
-                                <img class="letterhead-right" src="{{ $rightLogoUrl }}" alt="Right letterhead">
-                            </header>
+                            @include('print-letterhead')
                         </td>
                     </tr>
                 </thead>

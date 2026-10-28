@@ -540,6 +540,11 @@ new #[Title('Competitors')] class extends Component
             </label>
 
             <span class="text-sm text-slate-500">{{ $this->competitors->count() }} competitors</span>
+            <a
+                href="{{ route('competitors.print', ['sort' => $sortBy]) }}"
+                target="_blank"
+                class="rounded-md bg-white px-3 py-1.5 text-sm font-semibold ring-1 ring-slate-300 hover:bg-slate-50"
+            >Print entry list</a>
             @if (count($selected))
                 <button
                     type="button"

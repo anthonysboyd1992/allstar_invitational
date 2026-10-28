@@ -10,8 +10,8 @@
 
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     </head>
-    <body class="h-full font-sans text-slate-900 antialiased">
-        <header class="sticky top-0 z-30 bg-slate-900 text-white shadow">
+    <body class="flex h-full flex-col overflow-hidden font-sans text-slate-900 antialiased">
+        <header class="z-30 shrink-0 bg-slate-900 text-white shadow">
             <div class="flex h-14 items-center gap-6 px-4">
                 <a href="{{ route('home') }}" class="text-lg font-black uppercase tracking-wide">
                     Allstar <span class="text-amber-400">Invitational</span>
@@ -40,7 +40,7 @@
             </div>
         </header>
 
-        <main class="p-4">
+        <main class="min-h-0 flex-1 overflow-y-auto p-4">
             {{ $slot }}
         </main>
 

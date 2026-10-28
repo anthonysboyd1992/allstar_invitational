@@ -37,6 +37,14 @@ class Setting extends Model
 
     public const LetterheadRight = 'letterhead_right';
 
+    public const PrintHeading = 'print_heading';
+
+    public const PrintDate = 'print_date';
+
+    public const PrintVenue = 'print_venue';
+
+    public const PrintVenueName = 'print_venue_name';
+
     public const LetterheadDirectory = 'letterhead';
 
     /**
@@ -103,6 +111,23 @@ class Setting extends Model
         $path = static::letterheadPath($side);
 
         return $path ? MediaStorage::url($path) : asset('images/letterhead-'.$side.'.png');
+    }
+
+    /**
+     * Shared letterhead for every print sheet.
+     *
+     * @return array{leftLogoUrl: string, rightLogoUrl: string, printHeading: string, printDate: string, printVenueName: string, printVenue: string}
+     */
+    public static function printLetterhead(): array
+    {
+        return [
+            'leftLogoUrl' => static::letterheadUrl('left'),
+            'rightLogoUrl' => static::letterheadUrl('right'),
+            'printHeading' => (string) static::get(self::PrintHeading, ''),
+            'printDate' => (string) static::get(self::PrintDate, ''),
+            'printVenueName' => (string) static::get(self::PrintVenueName, ''),
+            'printVenue' => (string) static::get(self::PrintVenue, ''),
+        ];
     }
 
     /**

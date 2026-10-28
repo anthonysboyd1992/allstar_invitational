@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\TransferCalculator;
 use Database\Factories\RaceTypeFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -10,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Collection;
 
-#[Fillable(['name', 'sort_order', 'cars_per_race', 'cars_allowed', 'combines_groups', 'assigns_by_pill'])]
+#[Fillable(['name', 'sort_order', 'cars_per_race', 'cars_allowed', 'combines_groups', 'assigns_by_pill', 'has_results'])]
 class RaceType extends Model
 {
     /** @use HasFactory<RaceTypeFactory> */
@@ -22,6 +23,44 @@ class RaceType extends Model
     public function races(): HasMany
     {
         return $this->hasMany(Race::class)->orderBy('sort_order')->orderBy('id');
+    }
+
+    /**
+     * Every occupied seat in this type has a finish, so Calculate can run.
+     */
+    public function resultsAreComplete(): bool
+    {
+        $this->loadMissing('races.entries');
+        $occupied = $this->racesInProgramOrder()
+            ->filter(fn (Race $race): bool => $race->entries->isNotEmpty());
+
+        if ($occupied->isEmpty()) {
+            return false;
+        }
+
+        return $occupied->every(
+            fn (Race $race): bool => $race->entries->every(
+                fn (RaceEntry $entry): bool => $entry->finish_position !== null,
+            ),
+        );
+    }
+
+    /**
+     * Race this finisher transfers into, or null when the finish is blank or unmatched.
+     */
+    public function transferLabelFor(RaceEntry $entry): ?string
+    {
+        return (new TransferCalculator)->destinationLabel($this, $entry);
+    }
+
+    /**
+     * How finishers from this type fill later races.
+     *
+     * @return HasMany<RaceTypeTransferRule, $this>
+     */
+    public function transferRules(): HasMany
+    {
+        return $this->hasMany(RaceTypeTransferRule::class)->orderBy('sort_order')->orderBy('id');
     }
 
     /**
@@ -333,6 +372,7 @@ class RaceType extends Model
             'cars_allowed' => 'integer',
             'combines_groups' => 'boolean',
             'assigns_by_pill' => 'boolean',
+            'has_results' => 'boolean',
         ];
     }
 }

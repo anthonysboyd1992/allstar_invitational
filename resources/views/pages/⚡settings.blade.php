@@ -16,9 +16,47 @@ new #[Title('Settings')] class extends Component
 
     public ?TemporaryUploadedFile $rightLogo = null;
 
+    public string $printHeading = '';
+
+    public string $printDate = '';
+
+    public string $printVenueName = '';
+
+    public string $printVenue = '';
+
     public function boot(): void
     {
         Gate::authorize('access-settings');
+    }
+
+    public function mount(): void
+    {
+        $this->printHeading = (string) Setting::get(Setting::PrintHeading, '');
+        $this->printDate = (string) Setting::get(Setting::PrintDate, '');
+        $this->printVenueName = (string) Setting::get(Setting::PrintVenueName, '');
+        $this->printVenue = (string) Setting::get(Setting::PrintVenue, '');
+    }
+
+    public function savePrintHeader(): void
+    {
+        $validated = $this->validate([
+            'printHeading' => ['nullable', 'string', 'max:255'],
+            'printDate' => ['nullable', 'string', 'max:255'],
+            'printVenueName' => ['nullable', 'string', 'max:255'],
+            'printVenue' => ['nullable', 'string', 'max:255'],
+        ], attributes: [
+            'printHeading' => 'heading',
+            'printDate' => 'date',
+            'printVenueName' => 'venue name',
+            'printVenue' => 'venue location',
+        ]);
+
+        Setting::put(Setting::PrintHeading, trim((string) ($validated['printHeading'] ?? '')) ?: null);
+        Setting::put(Setting::PrintDate, trim((string) ($validated['printDate'] ?? '')) ?: null);
+        Setting::put(Setting::PrintVenueName, trim((string) ($validated['printVenueName'] ?? '')) ?: null);
+        Setting::put(Setting::PrintVenue, trim((string) ($validated['printVenue'] ?? '')) ?: null);
+
+        $this->dispatch('notify', message: 'Saved print heading.');
     }
 
     /**
@@ -83,6 +121,38 @@ new #[Title('Settings')] class extends Component
 
 <div class="mx-auto max-w-3xl space-y-4">
     <h1 class="text-2xl font-black uppercase">Settings</h1>
+
+    <section class="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
+        <div class="border-b border-slate-100 px-4 py-3">
+            <h2 class="font-black uppercase">Print heading</h2>
+            <p class="text-sm text-slate-500">Centered between the logos on lineup, results, and entry-list sheets.</p>
+        </div>
+        <form wire:submit="savePrintHeader" class="grid gap-3 p-4 sm:grid-cols-2">
+            <label class="block sm:col-span-2">
+                <span class="text-xs font-semibold text-slate-500">Heading</span>
+                <input wire:model="printHeading" class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
+                @error('printHeading') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
+            </label>
+            <label class="block">
+                <span class="text-xs font-semibold text-slate-500">Date</span>
+                <input wire:model="printDate" class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
+                @error('printDate') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
+            </label>
+            <label class="block">
+                <span class="text-xs font-semibold text-slate-500">Venue name</span>
+                <input wire:model="printVenueName" class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
+                @error('printVenueName') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
+            </label>
+            <label class="block sm:col-span-2">
+                <span class="text-xs font-semibold text-slate-500">Venue location</span>
+                <input wire:model="printVenue" class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
+                @error('printVenue') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
+            </label>
+            <div class="sm:col-span-2 flex justify-end">
+                <button type="submit" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-700">Save</button>
+            </div>
+        </form>
+    </section>
 
     <section class="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
         <div class="border-b border-slate-100 px-4 py-3">

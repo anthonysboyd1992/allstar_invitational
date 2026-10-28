@@ -23,7 +23,63 @@ class SettingsPageTest extends TestCase
             ->assertOk()
             ->assertSee('Letterhead logos')
             ->assertSee('Left (primary)')
-            ->assertSee('Right');
+            ->assertSee('Right')
+            ->assertSee('Print heading')
+            ->assertSee('Venue name')
+            ->assertSee('Venue location');
+    }
+
+    public function test_print_heading_cannot_exceed_255_characters(): void
+    {
+        $this->actingAs(User::factory()->create());
+
+        Livewire::test('pages::settings')
+            ->set('printHeading', str_repeat('A', 256))
+            ->call('savePrintHeader')
+            ->assertHasErrors(['printHeading']);
+
+        $this->assertNull(Setting::get(Setting::PrintHeading));
+    }
+
+    public function test_print_heading_date_and_venue_appear_on_every_sheet(): void
+    {
+        $this->actingAs(User::factory()->create());
+
+        Livewire::test('pages::settings')
+            ->set('printHeading', 'Allstar Invitational')
+            ->set('printDate', 'Saturday, October 28, 2026')
+            ->set('printVenueName', 'Hartford Speedway')
+            ->set('printVenue', 'Hartford, MI')
+            ->call('savePrintHeader')
+            ->assertHasNoErrors();
+
+        $this->assertSame('Allstar Invitational', Setting::get(Setting::PrintHeading));
+        $this->assertSame('Saturday, October 28, 2026', Setting::get(Setting::PrintDate));
+        $this->assertSame('Hartford Speedway', Setting::get(Setting::PrintVenueName));
+        $this->assertSame('Hartford, MI', Setting::get(Setting::PrintVenue));
+
+        foreach ([
+            route('lineups.print') => 'Lineups',
+            route('results.print') => 'Results',
+        ] as $url => $kind) {
+            $this->get($url)
+                ->assertOk()
+                ->assertSee('class="letterhead-kind">'.$kind.'</p>', false)
+                ->assertSee('class="letterhead-heading">Allstar Invitational</p>', false)
+                ->assertSee('class="letterhead-date">Saturday, October 28, 2026</p>', false)
+                ->assertSee('class="letterhead-venue-name">Hartford Speedway</p>', false)
+                ->assertSee('class="letterhead-venue">Hartford, MI</p>', false)
+                ->assertSee('text-align: center');
+        }
+
+        $this->get(route('competitors.print'))
+            ->assertOk()
+            ->assertDontSee('class="letterhead-kind"', false)
+            ->assertSee('class="letterhead-heading">Allstar Invitational</p>', false)
+            ->assertSee('class="letterhead-date">Saturday, October 28, 2026</p>', false)
+            ->assertSee('class="letterhead-venue-name">Hartford Speedway</p>', false)
+            ->assertSee('class="letterhead-venue">Hartford, MI</p>', false)
+            ->assertSee('text-align: center');
     }
 
     public function test_uploading_a_left_logo_stores_a_png(): void

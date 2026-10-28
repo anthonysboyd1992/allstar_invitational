@@ -856,10 +856,12 @@ class VmixDataTest extends TestCase
         $first = $template->createItem('Interview 1');
 
         $component = Livewire::test('pages::vmix-data')
-            ->set('newBreakSeconds', '0')
+            ->set('newBreakMinutes', '0')
+            ->set('newBreakExtraSeconds', '0')
             ->call('addBreak')
-            ->assertHasErrors('newBreakSeconds')
-            ->set('newBreakSeconds', '330')
+            ->assertHasErrors('newBreakMinutes')
+            ->set('newBreakMinutes', '5')
+            ->set('newBreakExtraSeconds', '30')
             ->call('addBreak')
             ->assertHasNoErrors()
             ->assertSee('Idle');
@@ -868,7 +870,9 @@ class VmixDataTest extends TestCase
         $this->assertSame(['Break 1', 330], [$break->name, $break->break_seconds]);
         $this->assertSame('5:30', VmixSection::formatSeconds($break->break_seconds));
         $this->assertFalse(VmixSection::query()->standalone()->whereKey($break->id)->exists());
-        $component->assertSet('selectedSectionId', $break->id)->set('breakSeconds', '90');
+        $component->assertSet('selectedSectionId', $break->id)
+            ->set('allottedMinutes', '1')
+            ->set('allottedExtraSeconds', '30');
         $this->assertSame(90, $break->refresh()->break_seconds);
 
         $second = $template->createItem('Interview 2');
@@ -885,7 +889,7 @@ class VmixDataTest extends TestCase
         $component->call('showNext');
         $this->assertFalse($break->refresh()->on_air);
         $this->assertNull($break->breakEndsAt());
-        $component->assertSee('Idle');
+        $component->assertSee('Interview 2 · 1:00');
 
         $component->call('selectSection', $break->id)->set('newGroupName', 'Nope')->call('addGroup')->assertForbidden();
         Livewire::test('pages::vmix-data')->call('removeFromRunOfShow', $break->id);
@@ -995,6 +999,122 @@ class VmixDataTest extends TestCase
         $this->assertSame('{}', $this->get(route('feeds.data'))->getContent());
 
         $component->call('goLive', $template->id)->assertNotFound();
+    }
+
+    public function test_allotted_seconds_save_on_a_run_of_show_item(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $template = VmixSection::factory()->template()->create(['name' => 'Interview']);
+        VmixField::factory()->for(VmixGroup::factory()->for($template, 'section'), 'group')->create(['key' => 'guest']);
+
+        Livewire::test('pages::vmix-data')
+            ->set('newItemTemplateId', (string) $template->id)
+            ->set('newItemName', 'Interview 1')
+            ->set('newItemMinutes', '1441')
+            ->call('addItem')
+            ->assertHasErrors('newItemMinutes')
+            ->set('newItemMinutes', '1')
+            ->set('newItemExtraSeconds', '30')
+            ->call('addItem')
+            ->assertHasNoErrors()
+            ->assertSee('Interview · 1:30')
+            ->set('allottedMinutes', '0')
+            ->set('allottedExtraSeconds', '45')
+            ->assertSee('Interview · 0:45');
+
+        $item = VmixSection::query()->where('name', 'Interview 1')->sole();
+        $this->assertSame(45, $item->allotted_seconds);
+        $this->assertSame('0:45', VmixSection::formatSeconds($item->allottedSeconds()));
+    }
+
+    public function test_an_allotted_item_starts_a_timer_and_advances_when_it_ends(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $this->freezeSecond();
+        $template = VmixSection::factory()->template()->create(['key' => 'interview']);
+        VmixField::factory()->for(VmixGroup::factory()->for($template, 'section'), 'group')->create(['key' => 'guest', 'value' => 'Max']);
+        $first = $template->createItem('Interview 1');
+        $first->update(['allotted_seconds' => 30]);
+        $second = $template->createItem('Interview 2');
+        $this->itemField($second, 'guest')->update(['value' => 'Tim', 'live_value' => 'Tim']);
+
+        $component = Livewire::test('pages::vmix-data')->call('showNext');
+
+        $first->refresh();
+        $this->assertTrue($first->on_air);
+        $this->assertTrue(now()->addSeconds(30)->equalTo($first->timerEndsAt()));
+        $component->assertSee('Interview 1 · 0:30');
+        $this->getJson(route('feeds.data'))->assertExactJson(['interview' => [['guest' => 'Max']]]);
+
+        $this->travel(29)->seconds();
+        $this->assertTrue($first->refresh()->on_air);
+        $this->getJson(route('feeds.data'))->assertExactJson(['interview' => [['guest' => 'Max']]]);
+
+        $this->travel(1)->seconds();
+        $this->getJson(route('feeds.data'))->assertExactJson(['interview' => [['guest' => 'Tim']]]);
+        $this->assertFalse($first->refresh()->on_air);
+        $this->assertTrue($second->refresh()->on_air);
+        $this->assertSame((string) $second->id, Setting::get(Setting::ShowCurrentItem));
+    }
+
+    public function test_an_item_without_allotted_time_runs_for_sixty_seconds(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $this->freezeSecond();
+        $template = VmixSection::factory()->template()->create(['key' => 'interview']);
+        VmixField::factory()->for(VmixGroup::factory()->for($template, 'section'), 'group')->create(['key' => 'guest', 'value' => 'Max']);
+        $first = $template->createItem('Interview 1');
+        $second = $template->createItem('Interview 2');
+        $this->itemField($second, 'guest')->update(['value' => 'Tim', 'live_value' => 'Tim']);
+
+        $component = Livewire::test('pages::vmix-data')->call('showNext');
+
+        $this->assertTrue(now()->addSeconds(60)->equalTo($first->refresh()->timerEndsAt()));
+        $component->assertSee('Interview 1 · 1:00');
+
+        $this->travel(59)->seconds();
+        $this->getJson(route('feeds.data'))->assertExactJson(['interview' => [['guest' => 'Max']]]);
+        $this->assertTrue($first->refresh()->on_air);
+
+        $this->travel(1)->seconds();
+        $this->getJson(route('feeds.data'))->assertExactJson(['interview' => [['guest' => 'Tim']]]);
+        $this->assertFalse($first->refresh()->on_air);
+        $this->assertTrue($second->refresh()->on_air);
+        $this->assertSame((string) $second->id, Setting::get(Setting::ShowCurrentItem));
+    }
+
+    public function test_a_placeholder_timer_advances_the_run_of_show_when_it_ends(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $this->freezeSecond();
+        $template = VmixSection::factory()->template()->create(['key' => 'interview']);
+        VmixField::factory()->for(VmixGroup::factory()->for($template, 'section'), 'group')->create(['key' => 'guest', 'value' => 'Max']);
+
+        $component = Livewire::test('pages::vmix-data')
+            ->set('newPlaceholderMinutes', '0')
+            ->set('newPlaceholderExtraSeconds', '30')
+            ->call('addPlaceholder')
+            ->assertHasNoErrors()
+            ->assertSee('Placeholder · 0:30');
+
+        $placeholder = VmixSection::query()->where('is_placeholder', true)->sole();
+        $this->assertSame(30, $placeholder->allotted_seconds);
+        $next = $template->createItem('Interview 1');
+
+        $component->call('goLive', $placeholder->id);
+        $this->assertFalse($placeholder->refresh()->on_air);
+        $this->assertSame((string) $placeholder->id, Setting::get(Setting::ShowCurrentItem));
+        $component->assertSee('Placeholder 1 · 0:30');
+        $this->assertSame('{}', $this->get(route('feeds.data'))->getContent());
+
+        $this->travel(29)->seconds();
+        $this->assertSame((string) $placeholder->id, Setting::get(Setting::ShowCurrentItem));
+        $this->assertFalse($next->refresh()->on_air);
+
+        $this->travel(1)->seconds();
+        $this->getJson(route('feeds.data'))->assertExactJson(['interview' => [['guest' => 'Max']]]);
+        $this->assertTrue($next->refresh()->on_air);
+        $this->assertSame((string) $next->id, Setting::get(Setting::ShowCurrentItem));
     }
 
     public function test_descriptions_save_as_a_bulleted_list_and_stay_out_of_the_master_file(): void

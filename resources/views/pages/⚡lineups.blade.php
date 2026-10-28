@@ -5,9 +5,11 @@ use App\Models\Competitor;
 use App\Models\Race;
 use App\Models\RaceEntry;
 use App\Models\RaceType;
+use App\Models\RaceTypeTransferRule;
 use App\Models\Setting;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -32,8 +34,13 @@ new #[Title('Races & Lineups')] class extends Component
 
     public ?int $editingRaceTypeId = null;
 
-    /** @var array{name?: string, shows_pill?: bool} */
+    /** @var array{name?: string, shows_pill?: bool, has_results?: bool} */
     public array $typeForm = [];
+
+    /**
+     * @var list<array{id: ?int, position_from: string, position_to: string, destination_race_type_id: string, distribute: string, destination_start_slot: string}>
+     */
+    public array $transferRules = [];
 
     /** @var array<string, string|null> */
     public array $raceForm = [];
@@ -283,21 +290,52 @@ new #[Title('Races & Lineups')] class extends Component
 
     public function openRaceTypeEditor(int $raceTypeId): void
     {
-        $raceType = RaceType::query()->findOrFail($raceTypeId);
+        $raceType = RaceType::query()->with('transferRules')->findOrFail($raceTypeId);
 
         $this->resetValidation();
         $this->editingRaceTypeId = $raceType->id;
         $this->typeForm = [
             'name' => $raceType->name,
             'shows_pill' => $raceType->assigns_by_pill,
+            'has_results' => $raceType->has_results,
         ];
+        $this->transferRules = $raceType->transferRules
+            ->map(fn (RaceTypeTransferRule $rule): array => [
+                'id' => $rule->id,
+                'position_from' => (string) $rule->position_from,
+                'position_to' => $rule->position_to === null ? '' : (string) $rule->position_to,
+                'destination_race_type_id' => (string) $rule->destination_race_type_id,
+                'distribute' => $rule->distribute,
+                'destination_start_slot' => $rule->destination_start_slot === null ? '' : (string) $rule->destination_start_slot,
+            ])
+            ->values()
+            ->all();
     }
 
     public function closeRaceTypeEditor(): void
     {
         $this->editingRaceTypeId = null;
         $this->typeForm = [];
+        $this->transferRules = [];
         $this->resetValidation();
+    }
+
+    public function addTransferRule(): void
+    {
+        $this->transferRules[] = [
+            'id' => null,
+            'position_from' => '',
+            'position_to' => '',
+            'destination_race_type_id' => '',
+            'distribute' => RaceTypeTransferRule::DistributeAppend,
+            'destination_start_slot' => '',
+        ];
+    }
+
+    public function removeTransferRule(int $index): void
+    {
+        unset($this->transferRules[$index]);
+        $this->transferRules = array_values($this->transferRules);
     }
 
     public function saveRaceType(): void
@@ -308,15 +346,56 @@ new #[Title('Races & Lineups')] class extends Component
         $data = $this->validate([
             'typeForm.name' => ['required', 'string', 'max:100'],
             'typeForm.shows_pill' => ['nullable', 'boolean'],
+            'typeForm.has_results' => ['nullable', 'boolean'],
+            'transferRules' => ['array'],
+            'transferRules.*.position_from' => ['required', 'integer', 'min:1', 'max:50'],
+            'transferRules.*.position_to' => ['nullable', 'integer', 'min:1', 'max:50'],
+            'transferRules.*.destination_race_type_id' => ['required', 'integer', Rule::exists('race_types', 'id')],
+            'transferRules.*.distribute' => ['required', Rule::in([RaceTypeTransferRule::DistributeAppend, RaceTypeTransferRule::DistributeStagger])],
+            'transferRules.*.destination_start_slot' => ['nullable', 'integer', 'min:1', 'max:50'],
         ], attributes: [
             'typeForm.name' => 'race type name',
             'typeForm.shows_pill' => 'show pill',
-        ])['typeForm'];
+            'typeForm.has_results' => 'has results',
+            'transferRules.*.position_from' => 'from position',
+            'transferRules.*.position_to' => 'to position',
+            'transferRules.*.destination_race_type_id' => 'destination',
+            'transferRules.*.distribute' => 'distribute',
+            'transferRules.*.destination_start_slot' => 'start slot',
+        ]);
 
         $raceType->update([
-            'name' => $data['name'],
-            'assigns_by_pill' => (bool) ($data['shows_pill'] ?? false),
+            'name' => $data['typeForm']['name'],
+            'assigns_by_pill' => (bool) ($data['typeForm']['shows_pill'] ?? false),
+            'has_results' => (bool) ($data['typeForm']['has_results'] ?? false),
         ]);
+
+        $keptIds = [];
+
+        foreach ($data['transferRules'] as $index => $row) {
+            $attributes = [
+                'position_from' => $row['position_from'],
+                'position_to' => $row['position_to'] ?: null,
+                'destination_race_type_id' => $row['destination_race_type_id'],
+                'distribute' => $row['distribute'],
+                'destination_start_slot' => $row['destination_start_slot'] ?: null,
+                'sort_order' => $index + 1,
+            ];
+            $existingId = $this->transferRules[$index]['id'] ?? null;
+            $rule = $existingId
+                ? $raceType->transferRules()->whereKey($existingId)->first()
+                : null;
+
+            if ($rule) {
+                $rule->update($attributes);
+            } else {
+                $rule = $raceType->transferRules()->create($attributes);
+            }
+
+            $keptIds[] = $rule->id;
+        }
+
+        $raceType->transferRules()->whereNotIn('id', $keptIds)->delete();
 
         $this->closeRaceTypeEditor();
         $this->dispatch('notify', message: "Saved {$raceType->name}.");
@@ -836,7 +915,7 @@ new #[Title('Races & Lineups')] class extends Component
             <form
                 wire:submit="saveRaceType"
                 x-init="$nextTick(() => $el.querySelector('input')?.select())"
-                class="w-full max-w-lg rounded-xl bg-white p-5 shadow-2xl"
+                class="w-full max-w-3xl rounded-xl bg-white p-5 shadow-2xl"
             >
                 <div class="mb-4 flex items-center justify-between">
                     <h2 class="text-lg font-black uppercase">Edit race type</h2>
@@ -857,6 +936,62 @@ new #[Title('Races & Lineups')] class extends Component
                             <span class="mt-0.5 block text-xs text-slate-500">Print and lineup cards include each driver’s pill number. Turn this on for Hotlaps and heats.</span>
                         </span>
                     </label>
+
+                    <label class="flex items-start gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm">
+                        <input type="checkbox" wire:model="typeForm.has_results" class="mt-0.5 size-4">
+                        <span>
+                            <span class="font-semibold text-slate-800">Has results</span>
+                            <span class="mt-0.5 block text-xs text-slate-500">Show this type on the Results page. Finish order is entered there, then Calculate fills destination lineups from the rules below.</span>
+                        </span>
+                    </label>
+
+                    <div class="space-y-2">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-semibold text-slate-500">Transfer rules</span>
+                            <button type="button" wire:click="addTransferRule" class="rounded-md px-2 py-1 text-xs font-bold ring-1 ring-slate-300 hover:bg-slate-50">+ Rule</button>
+                        </div>
+                        <p class="text-xs text-slate-400">Finish 1–1 to Dash with Append. Finish 3–5 to B-Main with Stagger. Leave To blank to include last place. Start slot is the first dest position to fill (e.g. 6 on a Feature).</p>
+                        @forelse ($transferRules as $index => $rule)
+                            <div wire:key="transfer-rule-{{ $rule['id'] ?? 'new-'.$index }}" class="grid grid-cols-6 gap-2 rounded-md border border-slate-200 p-2">
+                                <label class="block">
+                                    <span class="text-[10px] font-semibold tracking-wide text-slate-500 uppercase">From</span>
+                                    <input type="number" min="1" max="50" wire:model="transferRules.{{ $index }}.position_from" class="mt-0.5 w-full rounded-md border border-slate-300 px-1.5 py-1 text-sm focus:border-amber-500 focus:outline-none">
+                                </label>
+                                <label class="block">
+                                    <span class="text-[10px] font-semibold tracking-wide text-slate-500 uppercase">To</span>
+                                    <input type="number" min="1" max="50" wire:model="transferRules.{{ $index }}.position_to" placeholder="last" class="mt-0.5 w-full rounded-md border border-slate-300 px-1.5 py-1 text-sm focus:border-amber-500 focus:outline-none">
+                                </label>
+                                <label class="col-span-2 block">
+                                    <span class="text-[10px] font-semibold tracking-wide text-slate-500 uppercase">Destination</span>
+                                    <select wire:model="transferRules.{{ $index }}.destination_race_type_id" class="mt-0.5 w-full rounded-md border border-slate-300 px-1.5 py-1 text-sm focus:border-amber-500 focus:outline-none">
+                                        <option value="">Choose type</option>
+                                        @foreach ($this->raceTypes as $destType)
+                                            @continue($destType->id === $editingRaceTypeId)
+                                            <option value="{{ $destType->id }}" wire:key="transfer-dest-{{ $index }}-{{ $destType->id }}">{{ $destType->name }}</option>
+                                        @endforeach
+                                    </select>
+                                </label>
+                                <label class="block">
+                                    <span class="text-[10px] font-semibold tracking-wide text-slate-500 uppercase">Deal</span>
+                                    <select wire:model="transferRules.{{ $index }}.distribute" class="mt-0.5 w-full rounded-md border border-slate-300 px-1.5 py-1 text-sm focus:border-amber-500 focus:outline-none">
+                                        <option value="{{ \App\Models\RaceTypeTransferRule::DistributeAppend }}">Append</option>
+                                        <option value="{{ \App\Models\RaceTypeTransferRule::DistributeStagger }}">Stagger</option>
+                                    </select>
+                                </label>
+                                <div class="flex items-end gap-1">
+                                    <label class="block min-w-0 flex-1">
+                                        <span class="text-[10px] font-semibold tracking-wide text-slate-500 uppercase">Start slot</span>
+                                        <input type="number" min="1" max="50" wire:model="transferRules.{{ $index }}.destination_start_slot" placeholder="open" class="mt-0.5 w-full rounded-md border border-slate-300 px-1.5 py-1 text-sm focus:border-amber-500 focus:outline-none">
+                                    </label>
+                                    <button type="button" wire:click="removeTransferRule({{ $index }})" class="mb-0.5 rounded px-1 text-lg leading-none text-slate-400 hover:text-red-600">&times;</button>
+                                </div>
+                            </div>
+                        @empty
+                            <p class="text-xs text-slate-400">No transfer rules yet. Heats that fill Dash, Feature, and B-Mains need one rule per destination.</p>
+                        @endforelse
+                        @error('transferRules.*.position_from') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
+                        @error('transferRules.*.destination_race_type_id') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
+                    </div>
                 </div>
 
                 <div class="mt-5 flex justify-end gap-2">
@@ -868,7 +1003,7 @@ new #[Title('Races & Lineups')] class extends Component
     @endif
 
     {{-- Roster --}}
-    <aside class="sticky top-18 flex max-h-[calc(100vh-5.5rem)] w-72 shrink-0 flex-col rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
+    <aside class="sticky top-0 flex max-h-[calc(100vh-5.5rem)] w-72 shrink-0 flex-col rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
         <div class="border-b border-slate-200 p-3">
             <h2 class="text-sm font-bold tracking-wide text-slate-500 uppercase">Drivers</h2>
             <p class="mb-2 text-xs text-slate-400">
@@ -936,7 +1071,8 @@ new #[Title('Races & Lineups')] class extends Component
     </aside>
 
     {{-- Races --}}
-    <section class="min-w-0 flex-1 space-y-4">
+    <section class="min-w-0 flex-1">
+        <div class="sticky top-0 z-20 bg-slate-100 pb-4">
         <div class="flex flex-wrap items-end gap-3 rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200">
             <form wire:submit="addRaceType" class="flex items-end gap-2">
                 <label class="block">
@@ -978,7 +1114,9 @@ new #[Title('Races & Lineups')] class extends Component
                 </div>
             @endif
         </div>
+        </div>
 
+        <div class="space-y-4">
         @forelse ($this->raceTypes->when($typeFilter, fn ($types) => $types->where('id', $typeFilter)) as $raceType)
             <div wire:key="type-{{ $raceType->id }}" class="space-y-2">
                 <div class="flex items-center gap-2">
@@ -1297,5 +1435,6 @@ new #[Title('Races & Lineups')] class extends Component
                 Add a race type above — e.g. “Heat” with 4 races, or “Hot Laps” with 1.
             </div>
         @endforelse
+        </div>
     </section>
 </div>

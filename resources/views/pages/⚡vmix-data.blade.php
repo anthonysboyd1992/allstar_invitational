@@ -37,11 +37,23 @@ new #[Title('vMix Data')] class extends Component
 
     public string $newItemName = '';
 
-    public string $newBreakSeconds = '300';
+    public string $newBreakMinutes = '5';
+
+    public string $newBreakExtraSeconds = '0';
+
+    public string $newItemMinutes = '1';
+
+    public string $newItemExtraSeconds = '0';
 
     public string $newPlaceholderName = '';
 
-    public string $breakSeconds = '';
+    public string $allottedMinutes = '1';
+
+    public string $allottedExtraSeconds = '0';
+
+    public string $newPlaceholderMinutes = '1';
+
+    public string $newPlaceholderExtraSeconds = '0';
 
     public string $newGroupName = '';
 
@@ -92,13 +104,15 @@ new #[Title('vMix Data')] class extends Component
      */
     public function loadSection(): void
     {
-        unset($this->section, $this->templates, $this->runOfShow, $this->standaloneSections, $this->liveBreak, $this->currentItemId, $this->currentEntry, $this->upNext);
+        unset($this->section, $this->templates, $this->runOfShow, $this->standaloneSections, $this->liveTimer, $this->currentItemId, $this->currentEntry, $this->upNext);
         $section = $this->section;
 
         $this->sectionName = (string) $section?->name;
         $this->sectionDescriptionLines = $this->descriptionLinesForEditor($section);
         $this->sectionKey = (string) $section?->key;
-        $this->breakSeconds = (string) $section?->break_seconds;
+        $parts = VmixSection::splitSeconds($section?->allottedSeconds() ?? VmixSection::DefaultAllottedSeconds);
+        $this->allottedMinutes = (string) $parts['minutes'];
+        $this->allottedExtraSeconds = (string) $parts['seconds'];
         $this->groupNames = $section?->groups->mapWithKeys(fn (VmixGroup $group) => [$group->id => $group->name])->all() ?? [];
 
         $fields = $section?->groups->flatMap->fields ?? collect();
@@ -137,12 +151,14 @@ new #[Title('vMix Data')] class extends Component
     }
 
     /**
-     * The break counting down on the operator screen: the most recently started on-air break.
+     * The current run-of-show entry if it has an allotted countdown running.
      */
     #[Computed]
-    public function liveBreak(): ?VmixSection
+    public function liveTimer(): ?VmixSection
     {
-        return VmixSection::query()->whereNotNull('break_seconds')->where('on_air', true)->latest('on_air_at')->first();
+        $entry = $this->currentEntry;
+
+        return $entry?->timerEndsAt() ? $entry : null;
     }
 
     #[Computed]
@@ -289,22 +305,33 @@ new #[Title('vMix Data')] class extends Component
             return;
         }
 
+        $seconds = $this->durationFromFields($this->newItemMinutes, $this->newItemExtraSeconds, true);
+
+        if ($seconds === null) {
+            $this->addError('newItemMinutes', 'Allotted time must be between 1 second and 24 hours.');
+
+            return;
+        }
+
         $item = $template->createItem($name);
+        $item->update(['allotted_seconds' => $seconds]);
 
         $this->reset('newItemName');
-        $this->resetValidation('newItemName');
+        $this->newItemMinutes = '1';
+        $this->newItemExtraSeconds = '0';
+        $this->resetValidation('newItemName', 'newItemMinutes');
         $this->selectSection($item->id);
     }
 
     /**
-     * Called by the countdown when it reaches zero: end the break and put the next run-of-show entry on air.
+     * Called by the countdown when it reaches zero: end the current entry and put the next run-of-show entry on air.
      */
     public function finishBreak(): void
     {
         $previousItemId = $this->currentItemId;
 
         VmixSection::finishExpiredBreaks();
-        unset($this->currentItemId);
+        unset($this->currentItemId, $this->liveTimer);
 
         if ($this->currentItemId && $this->currentItemId !== $previousItemId) {
             $this->selectSection($this->currentItemId);
@@ -315,12 +342,15 @@ new #[Title('vMix Data')] class extends Component
 
     public function addBreak(): void
     {
-        $this->validate(
-            ['newBreakSeconds' => ['required', 'integer', 'min:1', 'max:86400']],
-            attributes: ['newBreakSeconds' => 'break length'],
-        );
+        $seconds = $this->durationFromFields($this->newBreakMinutes, $this->newBreakExtraSeconds, false);
 
-        $break = VmixSection::createBreak((int) $this->newBreakSeconds);
+        if ($seconds === null) {
+            $this->addError('newBreakMinutes', 'The break length must be between 1 second and 24 hours.');
+
+            return;
+        }
+
+        $break = VmixSection::createBreak($seconds);
 
         $this->selectSection($break->id);
     }
@@ -335,24 +365,92 @@ new #[Title('vMix Data')] class extends Component
             ['newPlaceholderName' => 'placeholder name'],
         );
 
-        $placeholder = VmixSection::createPlaceholder($this->newPlaceholderName);
+        $seconds = $this->durationFromFields($this->newPlaceholderMinutes, $this->newPlaceholderExtraSeconds, true);
+
+        if ($seconds === null) {
+            $this->addError('newPlaceholderMinutes', 'Allotted time must be between 1 second and 24 hours.');
+
+            return;
+        }
+
+        $placeholder = VmixSection::createPlaceholder($this->newPlaceholderName, $seconds);
 
         $this->reset('newPlaceholderName');
+        $this->newPlaceholderMinutes = '1';
+        $this->newPlaceholderExtraSeconds = '0';
+        $this->resetValidation('newPlaceholderName', 'newPlaceholderMinutes');
         $this->selectSection($placeholder->id);
     }
 
-    public function updatedBreakSeconds(string $seconds): void
+    public function updatedAllottedMinutes(): void
     {
-        $validator = Validator::make(['seconds' => $seconds], ['seconds' => ['required', 'integer', 'min:1', 'max:86400']]);
+        $this->saveAllottedDuration();
+    }
 
-        if ($validator->fails() || ! $this->section?->isBreak()) {
-            $this->dispatch('notify', message: 'The break length must be a number of seconds from 1 to 86400.', type: 'error');
-        } else {
-            $this->section->update(['break_seconds' => (int) $seconds]);
+    public function updatedAllottedExtraSeconds(): void
+    {
+        $this->saveAllottedDuration();
+    }
+
+    protected function saveAllottedDuration(): void
+    {
+        $section = $this->section;
+
+        if (! $section || $section->isTemplate()) {
+            $this->loadSection();
+
+            return;
         }
 
-        unset($this->liveBreak);
+        $seconds = $this->durationFromFields($this->allottedMinutes, $this->allottedExtraSeconds, true);
+
+        if ($seconds === null) {
+            $this->dispatch('notify', message: 'Allotted time must be between 1 second and 24 hours.', type: 'error');
+        } else {
+            $values = ['allotted_seconds' => $seconds];
+
+            if ($section->isBreak()) {
+                $values['break_seconds'] = $seconds;
+            }
+
+            $section->update($values);
+        }
+
+        unset($this->liveTimer);
         $this->loadSection();
+    }
+
+    /**
+     * Minutes and leftover seconds as a length in seconds. Empty fields become 60 seconds when $defaultIfEmpty is true.
+     */
+    protected function durationFromFields(string $minutes, string $seconds, bool $defaultIfEmpty): ?int
+    {
+        $minutes = trim($minutes);
+        $seconds = trim($seconds);
+
+        if ($minutes === '' && $seconds === '') {
+            return $defaultIfEmpty ? VmixSection::DefaultAllottedSeconds : null;
+        }
+
+        $validator = Validator::make(
+            ['minutes' => $minutes === '' ? 0 : $minutes, 'seconds' => $seconds === '' ? 0 : $seconds],
+            [
+                'minutes' => ['integer', 'min:0', 'max:1440'],
+                'seconds' => ['integer', 'min:0', 'max:59'],
+            ],
+        );
+
+        if ($validator->fails()) {
+            return null;
+        }
+
+        $total = ((int) ($minutes === '' ? 0 : $minutes)) * 60 + (int) ($seconds === '' ? 0 : $seconds);
+
+        if ($total < 1) {
+            return $defaultIfEmpty ? VmixSection::DefaultAllottedSeconds : null;
+        }
+
+        return $total > 86400 ? null : $total;
     }
 
     public function updatedSectionName(string $name): void
@@ -478,7 +576,7 @@ new #[Title('vMix Data')] class extends Component
             }
         }
 
-        unset($this->runOfShow, $this->standaloneSections, $this->currentItemId, $this->section, $this->liveBreak, $this->currentEntry, $this->upNext);
+        unset($this->runOfShow, $this->standaloneSections, $this->currentItemId, $this->section, $this->liveTimer, $this->currentEntry, $this->upNext);
     }
 
     /**
@@ -493,15 +591,14 @@ new #[Title('vMix Data')] class extends Component
             $current->update(['on_air' => false]);
         }
 
-        if (! $section->isPlaceholder()) {
+        if ($section->isInRunOfShow()) {
+            $section->startAllottedTimer();
+            Setting::put(Setting::ShowCurrentItem, (string) $section->id);
+        } elseif (! $section->isPlaceholder()) {
             $section->putOnAir();
         }
 
-        if ($section->isInRunOfShow()) {
-            Setting::put(Setting::ShowCurrentItem, (string) $section->id);
-        }
-
-        unset($this->runOfShow, $this->standaloneSections, $this->currentItemId, $this->liveBreak, $this->currentEntry, $this->upNext);
+        unset($this->runOfShow, $this->standaloneSections, $this->currentItemId, $this->liveTimer, $this->currentEntry, $this->upNext);
         $this->selectSection($section->id);
     }
 
@@ -536,7 +633,7 @@ new #[Title('vMix Data')] class extends Component
             $section->update(['show_order' => null]);
         }
 
-        unset($this->liveBreak);
+        unset($this->liveTimer);
         $this->loadSection();
     }
 
@@ -560,10 +657,7 @@ new #[Title('vMix Data')] class extends Component
             $items->get($currentIndex)->update(['on_air' => false]);
         }
 
-        if (! $target->isPlaceholder()) {
-            $target->putOnAir();
-        }
-
+        $target->startAllottedTimer();
         Setting::put(Setting::ShowCurrentItem, (string) $target->id);
 
         $this->selectSection($target->id);
@@ -943,7 +1037,7 @@ new #[Title('vMix Data')] class extends Component
 ?>
 
 <div class="space-y-4">
-    <div class="sticky top-14 z-20">
+    <div class="sticky top-0 z-20">
         <div class="overflow-hidden rounded-lg bg-slate-950 text-white shadow-sm ring-1 ring-slate-800">
             <div class="flex items-center gap-2 border-b border-slate-800 px-2 py-1">
                 <span class="text-[9px] font-black tracking-[0.18em] text-amber-400 uppercase">vMix</span>
@@ -954,13 +1048,13 @@ new #[Title('vMix Data')] class extends Component
                     class="rounded bg-amber-400 px-1.5 py-0.5 text-[10px] font-black text-slate-900"
                 >Copy</button>
             </div>
-    @php($liveBreak = $this->liveBreak)
+    @php($liveTimer = $this->liveTimer)
     <div
-        wire:key="clock-{{ $liveBreak?->id }}-{{ $liveBreak?->breakEndsAt()?->getTimestampMs() }}"
+        wire:key="clock-{{ $liveTimer?->id }}-{{ $liveTimer?->timerEndsAt()?->getTimestampMs() }}"
         x-data="{
             offset: {{ now()->getTimestampMs() }} - Date.now(),
             now: Date.now(),
-            endsAt: @js($liveBreak?->breakEndsAt()?->getTimestampMs()),
+            endsAt: @js($liveTimer?->timerEndsAt()?->getTimestampMs()),
             get time() { return new Date(this.now + this.offset).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) },
             get remaining() { return Math.round((this.endsAt - this.now - this.offset) / 1000) },
             get countdown() { const s = Math.abs(this.remaining); return (this.remaining < 0 ? '+' : '') + Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') },
@@ -1016,7 +1110,7 @@ new #[Title('vMix Data')] class extends Component
             >Next &#9654;</button>
         </div>
 
-        @if ($liveBreak)
+        @if ($liveTimer)
             <div
                 class="flex min-w-0 items-center justify-between gap-2 rounded px-2 py-1 transition-colors duration-300 sm:col-span-2 xl:col-span-1"
                 x-bind:class="{
@@ -1029,12 +1123,12 @@ new #[Title('vMix Data')] class extends Component
                     'bg-red-600 text-white animate-pulse': remaining <= 5,
                 }"
             >
-                <span class="min-w-0 truncate text-[9px] font-black tracking-[0.16em] uppercase opacity-80">{{ $liveBreak->name }} · {{ VmixSection::formatSeconds($liveBreak->break_seconds) }} <span x-text="remaining < 0 ? 'Over' : 'Remaining'" class="font-bold tracking-normal normal-case"></span></span>
+                <span class="min-w-0 truncate text-[9px] font-black tracking-[0.16em] uppercase opacity-80">{{ $liveTimer->name }} · {{ VmixSection::formatSeconds($liveTimer->allottedSeconds()) }} <span x-text="remaining < 0 ? 'Over' : 'Remaining'" class="font-bold tracking-normal normal-case"></span></span>
                 <span x-text="countdown" class="shrink-0 font-mono text-xl leading-none font-black tabular-nums"></span>
             </div>
         @else
             <div class="flex min-w-0 items-center gap-2 rounded bg-slate-900 px-2 py-1 ring-1 ring-slate-800 sm:col-span-2 xl:col-span-1">
-                <span class="text-[9px] font-black tracking-[0.16em] text-slate-500 uppercase">Break</span>
+                <span class="text-[9px] font-black tracking-[0.16em] text-slate-500 uppercase">Timer</span>
                 <span class="text-sm font-black text-slate-600">Idle</span>
             </div>
         @endif
@@ -1067,19 +1161,20 @@ new #[Title('vMix Data')] class extends Component
                 </select>
                 <input wire:model="newItemName" placeholder="Item name (optional), e.g. Interview 3" class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
                 @error('newItemName') <span class="block text-xs text-red-600">{{ $message }}</span> @enderror
+                @include('pages.vmix-duration-fields', ['label' => 'Allotted', 'minutes' => 'newItemMinutes', 'seconds' => 'newItemExtraSeconds'])
+                @error('newItemMinutes') <span class="block text-xs text-red-600">{{ $message }}</span> @enderror
                 <button type="submit" wire:loading.attr="disabled" wire:target="addItem" class="w-full rounded-md bg-slate-900 py-1.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50">Add item</button>
             </form>
             <form wire:submit="addBreak" class="border-t border-slate-200 p-3">
-                <div class="flex items-center gap-2">
-                    <input type="number" min="1" max="86400" wire:model="newBreakSeconds" aria-label="Break length in seconds" class="w-24 rounded-md border border-slate-300 px-2 py-1.5 text-right text-sm focus:border-amber-500 focus:outline-none">
-                    <span class="text-xs text-slate-500">sec</span>
-                    <button type="submit" wire:loading.attr="disabled" wire:target="addBreak" class="flex-1 rounded-md bg-slate-100 py-1.5 text-sm font-semibold hover:bg-slate-200 disabled:opacity-50">Add break</button>
-                </div>
-                @error('newBreakSeconds') <span class="block text-xs text-red-600">{{ $message }}</span> @enderror
+                @include('pages.vmix-duration-fields', ['label' => 'Length', 'minutes' => 'newBreakMinutes', 'seconds' => 'newBreakExtraSeconds'])
+                @error('newBreakMinutes') <span class="mt-1 block text-xs text-red-600">{{ $message }}</span> @enderror
+                <button type="submit" wire:loading.attr="disabled" wire:target="addBreak" class="mt-2 w-full rounded-md bg-slate-100 py-1.5 text-sm font-semibold hover:bg-slate-200 disabled:opacity-50">Add break</button>
             </form>
             <form wire:submit="addPlaceholder" class="border-t border-slate-200 p-3">
                 <input wire:model="newPlaceholderName" placeholder="Placeholder name, e.g. Feature winner" class="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
                 @error('newPlaceholderName') <span class="mt-1 block text-xs text-red-600">{{ $message }}</span> @enderror
+                @include('pages.vmix-duration-fields', ['label' => 'Allotted', 'minutes' => 'newPlaceholderMinutes', 'seconds' => 'newPlaceholderExtraSeconds'])
+                @error('newPlaceholderMinutes') <span class="mt-1 block text-xs text-red-600">{{ $message }}</span> @enderror
                 <button type="submit" wire:loading.attr="disabled" wire:target="addPlaceholder" class="mt-2 w-full rounded-md bg-slate-100 py-1.5 text-sm font-semibold hover:bg-slate-200 disabled:opacity-50">Add placeholder</button>
             </form>
         </div>

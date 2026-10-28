@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Competitor;
 use App\Models\Race;
 use App\Models\RaceType;
+use App\Models\RaceTypeTransferRule;
 use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -30,6 +31,8 @@ class LineupBoardTest extends TestCase
             ->assertOk()
             ->assertSee('Heat 1')
             ->assertSee('Assign by pill')
+            ->assertSee('min-h-0 flex-1 overflow-y-auto', false)
+            ->assertSee('sticky top-0 z-20 bg-slate-100', false)
             ->assertDontSee('Assign by weight')
             ->assertDontSee('toggleAssignsByPill');
     }
@@ -72,6 +75,36 @@ class LineupBoardTest extends TestCase
             ->assertSet('editingRaceTypeId', null);
 
         $this->assertTrue($type->refresh()->assigns_by_pill);
+    }
+
+    public function test_editing_a_race_type_saves_results_and_transfer_rules(): void
+    {
+        $heat = RaceType::factory()->create(['name' => 'Heat', 'has_results' => false]);
+        $dash = RaceType::factory()->create(['name' => 'Dash']);
+
+        Livewire::test('pages::lineups')
+            ->call('openRaceTypeEditor', $heat->id)
+            ->assertSet('typeForm.has_results', false)
+            ->set('typeForm.has_results', true)
+            ->call('addTransferRule')
+            ->set('transferRules.0.position_from', '1')
+            ->set('transferRules.0.position_to', '1')
+            ->set('transferRules.0.destination_race_type_id', (string) $dash->id)
+            ->set('transferRules.0.distribute', RaceTypeTransferRule::DistributeStagger)
+            ->set('transferRules.0.destination_start_slot', '6')
+            ->call('saveRaceType')
+            ->assertHasNoErrors()
+            ->assertSet('editingRaceTypeId', null);
+
+        $heat->refresh();
+        $this->assertTrue($heat->has_results);
+
+        $rule = $heat->transferRules()->sole();
+        $this->assertSame(1, $rule->position_from);
+        $this->assertSame(1, $rule->position_to);
+        $this->assertSame($dash->id, $rule->destination_race_type_id);
+        $this->assertSame(RaceTypeTransferRule::DistributeStagger, $rule->distribute);
+        $this->assertSame(6, $rule->destination_start_slot);
     }
 
     public function test_adding_a_race_type_creates_numbered_races(): void
