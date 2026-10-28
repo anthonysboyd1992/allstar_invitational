@@ -19,6 +19,7 @@ class RaceTypeFactory extends Factory
     {
         return [
             'name' => fake()->randomElement(['Hot Laps', 'Heat', 'Dash', 'B-Main', 'A-Main']),
+            'race_name' => null,
             'sort_order' => 0,
         ];
     }

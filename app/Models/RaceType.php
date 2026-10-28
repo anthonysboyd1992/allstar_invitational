@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Collection;
 
-#[Fillable(['name', 'sort_order', 'cars_per_race', 'cars_allowed', 'combines_groups', 'assigns_by_pill', 'has_results'])]
+#[Fillable(['name', 'race_name', 'sort_order', 'cars_per_race', 'cars_allowed', 'combines_groups', 'assigns_by_pill', 'has_results'])]
 class RaceType extends Model
 {
     /** @use HasFactory<RaceTypeFactory> */
@@ -73,6 +73,26 @@ class RaceType extends Model
         $this->races->each(fn (Race $race) => $race->setRelation('raceType', $this));
 
         return Race::inProgramOrder($this->races);
+    }
+
+    /**
+     * Label used when numbering races. Type "Heats" with race name "Heat" makes Heat 1.
+     */
+    public function raceLabel(): string
+    {
+        return filled($this->race_name) ? trim($this->race_name) : $this->name;
+    }
+
+    /**
+     * A single-race type keeps its type name (A-Main). Numbered races use {@see raceLabel()}.
+     */
+    public function nameForRace(int $number, int $of = 2): string
+    {
+        if ($of === 1) {
+            return $this->name;
+        }
+
+        return $this->raceLabel().' '.$number;
     }
 
     /**

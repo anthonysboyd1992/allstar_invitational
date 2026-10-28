@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
-#[Fillable(['race_type_id', 'name', 'laps', 'transfers', 'sponsor', 'starting_positions', 'sort_order'])]
+#[Fillable(['race_type_id', 'name', 'lineup_name', 'laps', 'transfers', 'sponsor', 'starting_positions', 'sort_order'])]
 class Race extends Model
 {
     /** @use HasFactory<RaceFactory> */
@@ -392,10 +392,27 @@ class Race extends Model
      */
     public function printedTitle(): string
     {
-        $name = $this->printedRaceName();
+        return $this->printedHeading($this->name);
+    }
+
+    /**
+     * Lineup print heading. A lineup override replaces the sponsor and race name.
+     */
+    public function printedLineupTitle(): string
+    {
+        if (filled($this->lineup_name)) {
+            return strtoupper(trim($this->lineup_name));
+        }
+
+        return $this->printedHeading($this->name);
+    }
+
+    private function printedHeading(string $name): string
+    {
+        $heading = strtoupper(trim($name));
         $sponsor = strtoupper(trim((string) $this->sponsor));
 
-        return $sponsor !== '' ? $sponsor.' - '.$name : $name;
+        return $sponsor !== '' ? $sponsor.' - '.$heading : $heading;
     }
 
     /**
@@ -451,7 +468,7 @@ class Race extends Model
         ]);
 
         return collect([[
-            'title' => $this->printedTitle(),
+            'title' => $this->printedLineupTitle(),
             'slots' => $slots,
             'race' => $this,
             'show_pill' => $showPill,

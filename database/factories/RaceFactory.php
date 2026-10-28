@@ -21,6 +21,7 @@ class RaceFactory extends Factory
         return [
             'race_type_id' => RaceType::factory(),
             'name' => 'Heat '.fake()->numberBetween(1, 9),
+            'lineup_name' => null,
             'laps' => 8,
             'transfers' => null,
             'sponsor' => null,

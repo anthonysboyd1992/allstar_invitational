@@ -96,6 +96,22 @@ class LineupPrintTest extends TestCase
             ->assertDontSee('Heat Race 2');
     }
 
+    public function test_printed_lineup_uses_the_lineup_override_name_without_sponsor(): void
+    {
+        $type = RaceType::factory()->create(['name' => 'Heats']);
+        $race = Race::factory()->for($type)->create([
+            'name' => 'Heat 1',
+            'lineup_name' => 'IMCA Modified Heat 1',
+            'sponsor' => 'ACME',
+        ]);
+
+        $this->get(route('lineups.print', ['races' => [$race->id]]))
+            ->assertOk()
+            ->assertSee('>IMCA MODIFIED HEAT 1</th>', false)
+            ->assertDontSee('ACME')
+            ->assertDontSee('>HEAT 1</th>', false);
+    }
+
     public function test_print_without_a_selection_includes_every_race(): void
     {
         $heat = RaceType::factory()->create(['name' => 'Heat', 'sort_order' => 1]);

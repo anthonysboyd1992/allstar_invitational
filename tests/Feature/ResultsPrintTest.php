@@ -86,6 +86,24 @@ class ResultsPrintTest extends TestCase
             ->assertSee('Back to results');
     }
 
+    public function test_printed_results_keep_the_race_name_when_a_lineup_override_is_set(): void
+    {
+        $type = RaceType::factory()->create(['name' => 'Heats', 'has_results' => true]);
+        $race = Race::factory()->for($type)->create([
+            'name' => 'Heat 1',
+            'lineup_name' => 'IMCA Modified Heat 1',
+            'sponsor' => 'ACME',
+        ]);
+        $driver = Competitor::factory()->create();
+        $race->syncLineup([$driver->id]);
+        $race->entries()->first()->update(['finish_position' => 1]);
+
+        $this->get(route('results.print', ['races' => [$race->id]]))
+            ->assertOk()
+            ->assertSee('ACME - HEAT 1')
+            ->assertDontSee('IMCA MODIFIED HEAT 1');
+    }
+
     public function test_print_picker_builds_results_url(): void
     {
         $type = RaceType::factory()->create(['name' => 'Heat', 'has_results' => true]);

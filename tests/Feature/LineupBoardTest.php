@@ -122,6 +122,40 @@ class LineupBoardTest extends TestCase
         $this->assertSame(['Hot Laps'], RaceType::query()->where('name', 'Hot Laps')->first()->races->pluck('name')->all());
     }
 
+    public function test_a_heats_type_numbers_races_from_the_race_name(): void
+    {
+        $component = Livewire::test('pages::lineups')
+            ->set('newTypeName', 'Heats')
+            ->set('newTypeRaceName', 'Heat')
+            ->set('newTypeRaceCount', 2)
+            ->call('addRaceType')
+            ->assertHasNoErrors();
+
+        $type = RaceType::query()->where('name', 'Heats')->first();
+        $this->assertSame('Heat', $type->race_name);
+        $this->assertSame(['Heat 1', 'Heat 2'], $type->races->pluck('name')->all());
+
+        $component->call('addRace', $type->id);
+
+        $this->assertSame(['Heat 1', 'Heat 2', 'Heat 3'], $type->refresh()->races->pluck('name')->all());
+    }
+
+    public function test_editing_a_race_type_saves_the_race_name(): void
+    {
+        $type = RaceType::factory()->create(['name' => 'Heat']);
+
+        Livewire::test('pages::lineups')
+            ->call('openRaceTypeEditor', $type->id)
+            ->set('typeForm.name', 'Heats')
+            ->set('typeForm.race_name', 'Heat')
+            ->call('saveRaceType')
+            ->assertHasNoErrors();
+
+        $type->refresh();
+        $this->assertSame('Heats', $type->name);
+        $this->assertSame('Heat', $type->race_name);
+    }
+
     public function test_dropping_roster_drivers_inserts_them_at_the_drop_position(): void
     {
         $race = Race::factory()->create();
@@ -359,6 +393,7 @@ class LineupBoardTest extends TestCase
             ->set('raceForm.transfers', 'Top 3 transfer')
             ->set('raceForm.starting_positions', '12')
             ->set('raceForm.sponsor', 'Casey’s')
+            ->set('raceForm.lineup_name', 'IMCA Modified Heat 1')
             ->call('saveRace')
             ->assertHasNoErrors()
             ->assertSet('editingRaceId', null);
@@ -370,6 +405,7 @@ class LineupBoardTest extends TestCase
         $this->assertSame('Top 3 transfer', $race->transfers);
         $this->assertSame(12, $race->starting_positions);
         $this->assertSame('Casey’s', $race->sponsor);
+        $this->assertSame('IMCA Modified Heat 1', $race->lineup_name);
     }
 
     public function test_edit_modal_validates_and_clears_blank_fields(): void

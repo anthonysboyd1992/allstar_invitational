@@ -32,7 +32,7 @@ class LineupPrintController extends Controller
             'races' => $races,
             'blocks' => $blocks,
             'sheetColumns' => max(6, (int) $blocks->max('columns')),
-            'title' => $races->count() === 1 ? $races->first()->printedTitle() : 'Lineups',
+            'title' => $races->count() === 1 ? $races->first()->printedLineupTitle() : 'Lineups',
             'printKind' => 'Lineups',
             ...Setting::printLetterhead(),
         ]);

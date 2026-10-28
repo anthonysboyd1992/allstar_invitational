@@ -22,6 +22,8 @@ new #[Title('Races & Lineups')] class extends Component
 
     public string $newTypeName = '';
 
+    public string $newTypeRaceName = '';
+
     public int $newTypeRaceCount = 1;
 
     public ?int $newTypeCarsPerRace = null;
@@ -34,7 +36,7 @@ new #[Title('Races & Lineups')] class extends Component
 
     public ?int $editingRaceTypeId = null;
 
-    /** @var array{name?: string, shows_pill?: bool, has_results?: bool} */
+    /** @var array{name?: string, race_name?: string, shows_pill?: bool, has_results?: bool} */
     public array $typeForm = [];
 
     /**
@@ -123,19 +125,23 @@ new #[Title('Races & Lineups')] class extends Component
     {
         $this->validate([
             'newTypeName' => ['required', 'string', 'max:100'],
+            'newTypeRaceName' => ['nullable', 'string', 'max:100'],
             'newTypeRaceCount' => ['required', 'integer', 'min:0', 'max:50'],
             'newTypeCarsPerRace' => ['nullable', 'integer', 'min:1', 'max:50'],
             'newTypeCarsAllowed' => ['nullable', 'integer', 'min:1', 'max:50'],
         ], attributes: [
             'newTypeName' => 'race type name',
+            'newTypeRaceName' => 'race name',
             'newTypeRaceCount' => 'number of races',
             'newTypeCarsPerRace' => 'group size',
             'newTypeCarsAllowed' => 'cars allowed',
         ]);
 
         $name = trim($this->newTypeName);
+        $raceName = trim($this->newTypeRaceName);
         $raceType = RaceType::query()->create([
             'name' => $name,
+            'race_name' => $raceName !== '' ? $raceName : null,
             'sort_order' => (int) RaceType::query()->max('sort_order') + 1,
             'cars_per_race' => $this->newTypeCarsPerRace,
             'cars_allowed' => $this->newTypeCarsAllowed,
@@ -144,12 +150,12 @@ new #[Title('Races & Lineups')] class extends Component
 
         for ($number = 1; $number <= $this->newTypeRaceCount; $number++) {
             $raceType->races()->create([
-                'name' => $this->newTypeRaceCount === 1 ? $name : "{$name} {$number}",
+                'name' => $raceType->nameForRace($number, $this->newTypeRaceCount),
                 'sort_order' => $number,
             ]);
         }
 
-        $this->reset('newTypeName', 'newTypeRaceCount', 'newTypeCarsPerRace', 'newTypeCarsAllowed', 'newTypeShowsPill');
+        $this->reset('newTypeName', 'newTypeRaceName', 'newTypeRaceCount', 'newTypeCarsPerRace', 'newTypeCarsAllowed', 'newTypeShowsPill');
         $this->dispatch('notify', message: "Added {$name}.");
     }
 
@@ -296,6 +302,7 @@ new #[Title('Races & Lineups')] class extends Component
         $this->editingRaceTypeId = $raceType->id;
         $this->typeForm = [
             'name' => $raceType->name,
+            'race_name' => (string) $raceType->race_name,
             'shows_pill' => $raceType->assigns_by_pill,
             'has_results' => $raceType->has_results,
         ];
@@ -342,9 +349,11 @@ new #[Title('Races & Lineups')] class extends Component
     {
         $raceType = RaceType::query()->findOrFail($this->editingRaceTypeId);
         $this->typeForm['name'] = trim((string) ($this->typeForm['name'] ?? ''));
+        $this->typeForm['race_name'] = trim((string) ($this->typeForm['race_name'] ?? ''));
 
         $data = $this->validate([
             'typeForm.name' => ['required', 'string', 'max:100'],
+            'typeForm.race_name' => ['nullable', 'string', 'max:100'],
             'typeForm.shows_pill' => ['nullable', 'boolean'],
             'typeForm.has_results' => ['nullable', 'boolean'],
             'transferRules' => ['array'],
@@ -355,6 +364,7 @@ new #[Title('Races & Lineups')] class extends Component
             'transferRules.*.destination_start_slot' => ['nullable', 'integer', 'min:1', 'max:50'],
         ], attributes: [
             'typeForm.name' => 'race type name',
+            'typeForm.race_name' => 'race name',
             'typeForm.shows_pill' => 'show pill',
             'typeForm.has_results' => 'has results',
             'transferRules.*.position_from' => 'from position',
@@ -366,6 +376,7 @@ new #[Title('Races & Lineups')] class extends Component
 
         $raceType->update([
             'name' => $data['typeForm']['name'],
+            'race_name' => $data['typeForm']['race_name'] !== '' ? $data['typeForm']['race_name'] : null,
             'assigns_by_pill' => (bool) ($data['typeForm']['shows_pill'] ?? false),
             'has_results' => (bool) ($data['typeForm']['has_results'] ?? false),
         ]);
@@ -416,7 +427,7 @@ new #[Title('Races & Lineups')] class extends Component
         $number = $raceType->races()->count() + 1;
 
         $raceType->races()->create([
-            'name' => "{$raceType->name} {$number}",
+            'name' => $raceType->nameForRace($number),
             'sort_order' => (int) $raceType->races()->max('sort_order') + 1,
         ]);
     }
@@ -429,6 +440,7 @@ new #[Title('Races & Lineups')] class extends Component
         $this->editingRaceId = $race->id;
         $this->raceForm = [
             'name' => $race->name,
+            'lineup_name' => (string) $race->lineup_name,
             'race_type_id' => (string) $race->race_type_id,
             'laps' => (string) $race->laps,
             'transfers' => (string) $race->transfers,
@@ -452,6 +464,7 @@ new #[Title('Races & Lineups')] class extends Component
 
         $data = $this->validate([
             'raceForm.name' => ['required', 'string', 'max:100'],
+            'raceForm.lineup_name' => ['nullable', 'string', 'max:100'],
             'raceForm.race_type_id' => ['required', 'integer', 'exists:race_types,id'],
             'raceForm.laps' => ['nullable', 'integer', 'min:0', 'max:999'],
             'raceForm.transfers' => ['nullable', 'string', 'max:150'],
@@ -459,6 +472,7 @@ new #[Title('Races & Lineups')] class extends Component
             'raceForm.starting_positions' => ['nullable', 'integer', 'min:1', 'max:50'],
         ], attributes: [
             'raceForm.name' => 'race name',
+            'raceForm.lineup_name' => 'lineup override name',
             'raceForm.race_type_id' => 'race type',
             'raceForm.laps' => 'laps',
             'raceForm.transfers' => 'transfer text',
@@ -862,6 +876,12 @@ new #[Title('Races & Lineups')] class extends Component
                     </label>
 
                     <label class="block">
+                        <span class="text-xs font-semibold text-slate-500">Lineup override name</span>
+                        <input wire:model="raceForm.lineup_name" placeholder="Print heading" class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-2 text-sm focus:border-amber-500 focus:outline-none">
+                        @error('raceForm.lineup_name') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
+                    </label>
+
+                    <label class="block">
                         <span class="text-xs font-semibold text-slate-500">Race type</span>
                         <select wire:model="raceForm.race_type_id" class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-2 text-sm focus:border-amber-500 focus:outline-none">
                             @foreach ($this->raceTypes as $raceType)
@@ -896,7 +916,7 @@ new #[Title('Races & Lineups')] class extends Component
                     </label>
                 </div>
 
-                <p class="mt-3 text-xs text-slate-400">Starting positions keep empty spots open, so you can fill 6–10 before 1–5. Leave blank to pack from 1 as you add. Laps and transfer text feed vMix and the timing .dat file.</p>
+                <p class="mt-3 text-xs text-slate-400">Lineup override name is the heading on printed lineup sheets and replaces the sponsor. Leave it blank to print sponsor and race name. Starting positions keep empty spots open, so you can fill 6–10 before 1–5. Leave blank to pack from 1 as you add. Laps and transfer text feed vMix and the timing .dat file.</p>
 
                 <div class="mt-5 flex justify-end gap-2">
                     <button type="button" wire:click="closeRaceEditor" class="rounded-md px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">Cancel</button>
@@ -923,11 +943,19 @@ new #[Title('Races & Lineups')] class extends Component
                 </div>
 
                 <div class="space-y-3">
-                    <label class="block">
-                        <span class="text-xs font-semibold text-slate-500">Name</span>
-                        <input wire:model="typeForm.name" class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-2 text-sm focus:border-amber-500 focus:outline-none">
-                        @error('typeForm.name') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
-                    </label>
+                    <div class="grid grid-cols-2 gap-3">
+                        <label class="block">
+                            <span class="text-xs font-semibold text-slate-500">Type name</span>
+                            <input wire:model="typeForm.name" class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-2 text-sm focus:border-amber-500 focus:outline-none">
+                            @error('typeForm.name') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
+                        </label>
+                        <label class="block">
+                            <span class="text-xs font-semibold text-slate-500">Race name</span>
+                            <input wire:model="typeForm.race_name" placeholder="Heat" class="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-2 text-sm focus:border-amber-500 focus:outline-none">
+                            @error('typeForm.race_name') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
+                            <span class="mt-0.5 block text-xs text-slate-500">Heats + Heat makes Heat 1, Heat 2. Leave blank to use the type name.</span>
+                        </label>
+                    </div>
 
                     <label class="flex items-start gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm">
                         <input type="checkbox" wire:model="typeForm.shows_pill" class="mt-0.5 size-4">
@@ -1077,7 +1105,11 @@ new #[Title('Races & Lineups')] class extends Component
             <form wire:submit="addRaceType" class="flex items-end gap-2">
                 <label class="block">
                     <span class="text-xs font-semibold text-slate-500">New race type</span>
-                    <input wire:model="newTypeName" placeholder="Heat, Hot Laps, A-Main…" class="mt-0.5 block w-48 rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
+                    <input wire:model="newTypeName" placeholder="Heats, Hot Laps, A-Main…" class="mt-0.5 block w-40 rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
+                </label>
+                <label class="block" title="Numbered races use this name: Heat 1, Heat 2. Leave blank to use the type name.">
+                    <span class="text-xs font-semibold text-slate-500">Race name</span>
+                    <input wire:model="newTypeRaceName" placeholder="Heat" class="mt-0.5 block w-28 rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-amber-500 focus:outline-none">
                 </label>
                 <label class="block">
                     <span class="text-xs font-semibold text-slate-500">Races</span>
@@ -1101,6 +1133,7 @@ new #[Title('Races & Lineups')] class extends Component
                 <button type="button" wire:click="openPrintPicker" class="rounded-md bg-white px-3 py-1.5 text-sm font-semibold ring-1 ring-slate-300 hover:bg-slate-50">Print</button>
             @endif
             @error('newTypeName') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
+            @error('newTypeRaceName') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
             @error('newTypeRaceCount') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
             @error('newTypeCarsAllowed') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
             @error('newTypeCarsPerRace') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
