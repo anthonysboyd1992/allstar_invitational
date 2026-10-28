@@ -48,6 +48,9 @@ new #[Title('Races & Lineups')] class extends Component
     /** @var list<string> */
     public array $printRaceIds = [];
 
+    /** @var array<string, string> */
+    public array $carNumberInputs = [];
+
     #[Computed]
     public function raceTypes(): Collection
     {
@@ -545,6 +548,42 @@ new #[Title('Races & Lineups')] class extends Component
             return;
         }
 
+        $this->addCompetitorToRace($race, $competitorId);
+    }
+
+    public function addByCarNumber(int $raceId): void
+    {
+        $key = (string) $raceId;
+        $number = ltrim(trim((string) ($this->carNumberInputs[$key] ?? '')), '#');
+
+        if ($number === '') {
+            $this->dispatch('notify', message: 'Type a car number.', type: 'error');
+
+            return;
+        }
+
+        $matches = Competitor::query()
+            ->whereRaw('LOWER(car_number) = ?', [mb_strtolower($number)])
+            ->get();
+
+        if ($matches->isEmpty()) {
+            $this->dispatch('notify', message: 'No driver has car '.$number.'.', type: 'error');
+
+            return;
+        }
+
+        if ($matches->count() > 1) {
+            $this->dispatch('notify', message: 'More than one driver has car '.$number.'.', type: 'error');
+
+            return;
+        }
+
+        $this->addCompetitorToRace(Race::query()->findOrFail($raceId), $matches->first()->id);
+        $this->carNumberInputs[$key] = '';
+    }
+
+    private function addCompetitorToRace(Race $race, int $competitorId): void
+    {
         $lineup = $race->lineupIds();
 
         if (in_array($competitorId, $lineup, true)) {
@@ -1089,7 +1128,7 @@ new #[Title('Races & Lineups')] class extends Component
                             ])
                         >
                             <div class="border-b border-slate-100 px-3 py-2">
-                                <div class="flex items-center gap-2">
+                                <div class="flex flex-wrap items-center gap-2">
                                     <span class="min-w-0 flex-1 truncate font-bold">{{ $race->name }}</span>
                                     <span class="text-xs text-slate-400">
                                         {{ $race->entries->count() }}@if ($race->hasFixedField())/{{ $race->starting_positions }}@endif drivers
@@ -1107,6 +1146,20 @@ new #[Title('Races & Lineups')] class extends Component
                                             class="w-12 rounded-md border border-slate-300 px-1.5 py-0.5 text-xs font-bold text-slate-900 focus:border-amber-500 focus:outline-none"
                                         >
                                     </label>
+                                    <form
+                                        wire:submit="addByCarNumber({{ $race->id }})"
+                                        wire:click.stop
+                                        class="flex items-center gap-1"
+                                    >
+                                        <input
+                                            type="text"
+                                            wire:model="carNumberInputs.{{ $race->id }}"
+                                            placeholder="Car #"
+                                            autocomplete="off"
+                                            class="w-14 rounded-md border border-slate-300 px-1.5 py-0.5 text-xs font-bold text-slate-900 focus:border-amber-500 focus:outline-none"
+                                        >
+                                        <button type="submit" class="rounded px-2 py-0.5 text-xs font-bold text-slate-600 ring-1 ring-slate-300 hover:bg-slate-100">Add</button>
+                                    </form>
                                     @if ($isLive)
                                         <span class="rounded bg-red-600 px-2 py-0.5 text-xs font-bold text-white">LIVE</span>
                                     @endif

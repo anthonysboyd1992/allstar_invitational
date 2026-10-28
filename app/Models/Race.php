@@ -283,7 +283,7 @@ class Race extends Model
             'slots' => $this->lineupSlots(),
             'race' => $this,
             'show_pill' => $showPill,
-            'columns' => $showPill ? 8 : 7,
+            'columns' => $showPill ? 7 : 6,
         ]]);
     }
 

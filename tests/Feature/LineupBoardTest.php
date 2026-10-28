@@ -223,6 +223,78 @@ class LineupBoardTest extends TestCase
         $this->assertDatabaseCount('race_entries', 0);
     }
 
+    public function test_typing_a_car_number_adds_that_driver_to_that_race(): void
+    {
+        $heat = Race::factory()->create(['name' => 'Heat 1']);
+        $feature = Race::factory()->create(['name' => 'Feature']);
+        $driver = Competitor::factory()->create(['car_number' => '47', 'first_name' => 'Collin', 'last_name' => 'Thirlby']);
+
+        Livewire::test('pages::lineups')
+            ->set('carNumberInputs.'.$heat->id, '#47')
+            ->call('addByCarNumber', $heat->id)
+            ->assertHasNoErrors()
+            ->assertSet('carNumberInputs.'.$heat->id, '');
+
+        $this->assertSame([$driver->id], $heat->fresh()->lineupIds());
+        $this->assertSame([], $feature->fresh()->lineupIds());
+    }
+
+    public function test_unknown_car_number_does_not_add_a_driver(): void
+    {
+        $race = Race::factory()->create();
+
+        Livewire::test('pages::lineups')
+            ->set('carNumberInputs.'.$race->id, '99')
+            ->call('addByCarNumber', $race->id)
+            ->assertDispatched('notify', type: 'error');
+
+        $this->assertDatabaseCount('race_entries', 0);
+    }
+
+    public function test_car_number_lookup_matches_regardless_of_case(): void
+    {
+        $race = Race::factory()->create();
+        $driver = Competitor::factory()->create(['car_number' => '5G']);
+
+        Livewire::test('pages::lineups')
+            ->set('carNumberInputs.'.$race->id, '5g')
+            ->call('addByCarNumber', $race->id)
+            ->assertHasNoErrors();
+
+        $this->assertSame([$driver->id], $race->fresh()->lineupIds());
+    }
+
+    public function test_typing_a_car_number_fills_the_first_empty_spot_of_a_fixed_field(): void
+    {
+        $race = Race::factory()->create(['starting_positions' => 10]);
+        $rear = Competitor::factory()->create(['car_number' => '2']);
+        $front = Competitor::factory()->create(['car_number' => '1']);
+        $race->placeInSlot($rear->id, 10);
+
+        Livewire::test('pages::lineups')
+            ->set('carNumberInputs.'.$race->id, '1')
+            ->call('addByCarNumber', $race->id)
+            ->assertHasNoErrors();
+
+        $this->assertSame(
+            [1, 10],
+            $race->fresh()->entries()->pluck('start_position')->all(),
+        );
+    }
+
+    public function test_a_duplicate_car_number_does_not_add_a_driver(): void
+    {
+        $race = Race::factory()->create();
+        Competitor::factory()->count(2)->create(['car_number' => '7']);
+
+        Livewire::test('pages::lineups')
+            ->set('carNumberInputs.'.$race->id, '7')
+            ->call('addByCarNumber', $race->id)
+            ->assertDispatched('notify', type: 'error');
+
+        $this->assertDatabaseCount('race_entries', 0);
+    }
+
     public function test_race_types_can_be_reordered(): void
     {
         $hotLaps = RaceType::factory()->create(['name' => 'Hot Laps', 'sort_order' => 1]);

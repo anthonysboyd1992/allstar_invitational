@@ -31,6 +31,7 @@ class LineupPrintController extends Controller
         return view('lineups-print', [
             'races' => $races,
             'blocks' => $blocks,
+            'sheetColumns' => max(6, (int) $blocks->max('columns')),
             'title' => $races->count() === 1 ? $races->first()->printedTitle() : 'Lineups',
             'leftLogoUrl' => Setting::letterheadUrl('left'),
             'rightLogoUrl' => Setting::letterheadUrl('right'),

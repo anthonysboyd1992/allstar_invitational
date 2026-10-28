@@ -59,6 +59,20 @@ class UserPermissionsTest extends TestCase
             ->assertDontSee('href="'.route('settings').'"', false);
     }
 
+    public function test_existing_lineup_operators_gain_cars_access(): void
+    {
+        $operator = User::factory()->withAreas(['competitors', 'lineups', 'settings', 'users'])->create();
+        $timing = User::factory()->withAreas(['timing'])->create();
+
+        (require database_path('migrations/2026_10_28_173004_add_cars_area_to_existing_users.php'))->up();
+
+        $this->assertSame(
+            ['competitors', 'cars', 'lineups', 'settings', 'users'],
+            $operator->fresh()->permissions,
+        );
+        $this->assertSame(['timing'], $timing->fresh()->permissions);
+    }
+
     public function test_admins_can_add_a_user_with_a_preset(): void
     {
         $this->actingAs(User::factory()->create());

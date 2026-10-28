@@ -26,7 +26,7 @@ class LineupPrintTest extends TestCase
         $this->actingAs(User::factory()->create());
     }
 
-    public function test_printed_lineup_lists_starting_order_hometown_weight_and_kart(): void
+    public function test_printed_lineup_lists_starting_order_hometown_and_kart(): void
     {
         $type = RaceType::factory()->create(['name' => 'Heat']);
         $race = Race::factory()->for($type)->create([
@@ -62,14 +62,15 @@ class LineupPrintTest extends TestCase
             ->assertSee('MOVE OVER MICHIGAN DIRT LATE MODEL SERIES - HEAT RACE 1')
             ->assertSee('Pos')
             ->assertSee('Kart Assignment')
-            ->assertSee('.pill, .weight, .kart { text-align: center', false)
+            ->assertSee('.pill, .kart { text-align: center', false)
             ->assertSee('Conner Zbozien')
             ->assertSee('St. Clair Shores, MI')
             ->assertSee('2024 Flat Rock Speedway Track Champion')
-            ->assertSee('160')
             ->assertSee('class="kart">5</td>', false)
             ->assertSee('Collin Thirlby')
             ->assertSee('class="kart">1</td>', false)
+            ->assertDontSee('class="weight"', false)
+            ->assertDontSee('>Weight</th>', false)
             ->assertDontSee('SLOWEST')
             ->assertDontSee('FAST')
             ->assertSee('images/letterhead-left.png', false)
@@ -77,7 +78,7 @@ class LineupPrintTest extends TestCase
             ->assertSee('letterhead-left')
             ->assertSee('1.25in')
             ->assertSee('letterhead-right')
-            ->assertSee('.letterhead-right { height: 0.7in', false)
+            ->assertSee('.letterhead-right { height: 0.7in; max-width: 2.8in; flex: 0 0 auto; margin-left: auto', false)
             ->assertSee('letter landscape')
             ->assertSee('11in')
             ->assertSee('class="accolades"', false)
@@ -210,7 +211,7 @@ class LineupPrintTest extends TestCase
             ->assertDontSee('FEATURE');
     }
 
-    public function test_printed_lineup_includes_pill_before_weight_when_the_type_option_is_on(): void
+    public function test_printed_lineup_includes_pill_before_kart_when_the_type_option_is_on(): void
     {
         $type = RaceType::factory()->create(['assigns_by_pill' => true]);
         $race = Race::factory()->for($type)->create(['name' => 'Heat 1']);
@@ -218,7 +219,6 @@ class LineupPrintTest extends TestCase
             'first_name' => 'Ann',
             'last_name' => 'One',
             'pill_number' => 17,
-            'weight' => 180.0,
         ]);
         $race->syncLineup([$driver->id]);
 
@@ -227,11 +227,12 @@ class LineupPrintTest extends TestCase
             ->assertSeeInOrder([
                 'class="accolades">Accolades</th>',
                 'class="pill">Pill</th>',
-                'class="weight">Weight</th>',
+                'class="kart">Kart Assignment</th>',
                 'Ann One',
                 'class="pill">17</td>',
-                'class="weight">180</td>',
-            ], false);
+            ], false)
+            ->assertSee('colspan="7"', false)
+            ->assertDontSee('class="weight"', false);
     }
 
     public function test_printed_lineup_omits_pill_when_the_type_option_is_off(): void
@@ -248,8 +249,9 @@ class LineupPrintTest extends TestCase
         $this->get(route('lineups.print', ['races' => [$race->id]]))
             ->assertOk()
             ->assertSee('Ann One')
-            ->assertSee('class="weight">Weight</th>', false)
-            ->assertDontSee('class="pill"', false);
+            ->assertSee('class="kart">Kart Assignment</th>', false)
+            ->assertDontSee('class="pill"', false)
+            ->assertDontSee('class="weight"', false);
     }
 
     public function test_a_fixed_field_prints_empty_starting_spots(): void

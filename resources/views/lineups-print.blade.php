@@ -20,11 +20,11 @@
             }
             .sheet-pages { width: 100%; border-collapse: collapse; }
             .sheet-pages > thead { display: table-header-group; }
-            .sheet-pages > thead > tr > td { padding: 0 0 10px; background: #fff; border: 0; color: inherit; }
-            .letterhead { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+            .sheet-pages > thead > tr > td { width: 100%; padding: 0 0 10px; background: #fff; border: 0; color: inherit; }
+            .letterhead { display: flex; align-items: center; gap: 12px; width: 100%; }
             .letterhead img { display: block; width: auto; object-fit: contain; }
             .letterhead-left { height: 1.25in; max-width: 5in; flex: 1 1 auto; object-position: left center; }
-            .letterhead-right { height: 0.7in; max-width: 2.8in; flex: 0 0 auto; object-position: right center; }
+            .letterhead-right { height: 0.7in; max-width: 2.8in; flex: 0 0 auto; margin-left: auto; object-position: right center; }
             .race-block, .race-block tr {
                 break-inside: avoid;
                 page-break-inside: avoid;
@@ -38,11 +38,11 @@
                 print-color-adjust: exact;
             }
             td { border-bottom: 1px solid #d1d5db; }
-            .pos, .car, .driver, .pill, .weight, .kart { white-space: nowrap; width: 1%; }
+            .pos, .car, .driver, .pill, .kart { white-space: nowrap; width: 1%; }
             .pos, .car { font-weight: 700; }
             .hometown { width: 18%; }
             .accolades { width: 42%; }
-            .pill, .weight, .kart { text-align: center; }
+            .pill, .kart { text-align: center; }
             .kart { font-weight: 700; }
             .empty { padding: 10px 6px; color: #64748b; }
             @page { size: letter landscape; margin: 0.5in; }
@@ -76,7 +76,7 @@
             <table class="sheet-pages">
                 <thead>
                     <tr>
-                        <td colspan="7">
+                        <td colspan="{{ $sheetColumns }}">
                             <header class="letterhead">
                                 <img class="letterhead-left" src="{{ $leftLogoUrl }}" alt="Left letterhead">
                                 <img class="letterhead-right" src="{{ $rightLogoUrl }}" alt="Right letterhead">
@@ -99,7 +99,6 @@
                             @if ($showPill)
                                 <th class="pill">Pill</th>
                             @endif
-                            <th class="weight">Weight</th>
                             <th class="kart">Kart Assignment</th>
                         </tr>
                         @forelse ($block['slots'] as $slot)
@@ -113,7 +112,6 @@
                                 @if ($showPill)
                                     <td class="pill">{{ $entry?->competitor?->pill_number }}</td>
                                 @endif
-                                <td class="weight">{{ $entry?->competitor?->formattedWeight() }}</td>
                                 <td class="kart">{{ $entry ? $block['race']->kartAssignment($entry) : '' }}</td>
                             </tr>
                         @empty
@@ -125,7 +123,7 @@
                 @empty
                     <tbody>
                         <tr>
-                            <td colspan="7" class="empty">No races selected to print.</td>
+                            <td colspan="{{ $sheetColumns }}" class="empty">No races selected to print.</td>
                         </tr>
                     </tbody>
                 @endforelse
