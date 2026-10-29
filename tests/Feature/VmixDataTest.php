@@ -1117,6 +1117,163 @@ class VmixDataTest extends TestCase
         $this->assertSame((string) $next->id, Setting::get(Setting::ShowCurrentItem));
     }
 
+    public function test_end_of_show_remaining_is_the_sum_of_allotted_times_when_idle(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $this->travelTo('2026-10-29 15:00:00');
+        $template = VmixSection::factory()->template()->create();
+        $first = $template->createItem('Interview 1');
+        $first->update(['allotted_seconds' => 480]);
+        $second = $template->createItem('Interview 2');
+        $second->update(['allotted_seconds' => 180]);
+
+        $this->assertSame(660, VmixSection::remainingUntilEndOfShow(null, VmixSection::query()->runOfShow()->get()));
+
+        Livewire::test('pages::vmix-data')
+            ->assertSee('End of show')
+            ->assertSee('11:00')
+            ->assertSee('Done at')
+            ->assertSee('3:11:00 PM')
+            ->assertDontSee('-1m')
+            ->assertDontSee('+1m');
+    }
+
+    public function test_end_of_show_remaining_includes_current_leftover_and_later_items(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $this->travelTo('2026-10-29 15:00:00');
+        $template = VmixSection::factory()->template()->create();
+        $first = $template->createItem('Interview 1');
+        $first->update(['allotted_seconds' => 480]);
+        $second = $template->createItem('Interview 2');
+        $second->update(['allotted_seconds' => 180]);
+
+        $component = Livewire::test('pages::vmix-data')->call('showNext');
+
+        $this->assertSame(660, VmixSection::remainingUntilEndOfShow($first->refresh(), VmixSection::query()->runOfShow()->get()));
+        $component
+            ->assertSee('11:00')
+            ->assertSee('Done at')
+            ->assertSee('3:11:00 PM')
+            ->assertSee('-30s')
+            ->assertSee('+30s')
+            ->assertSee('-1m')
+            ->assertSee('+1m')
+            ->assertSee('-5m')
+            ->assertSee('+5m')
+            ->assertSee('Add 30 seconds')
+            ->assertSee('Subtract 1 minute')
+            ->assertSee('Add 5 minutes');
+
+        $this->travel(60)->seconds();
+        $component->call('$refresh');
+
+        $this->assertSame(600, VmixSection::remainingUntilEndOfShow($first->refresh(), VmixSection::query()->runOfShow()->get()));
+        $component->assertSee('10:00')->assertSee('3:11:00 PM');
+    }
+
+    public function test_bumping_the_current_timer_adds_a_minute_without_changing_allotted_time(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $this->travelTo('2026-10-29 15:00:00');
+        $template = VmixSection::factory()->template()->create();
+        $first = $template->createItem('Interview 1');
+        $first->update(['allotted_seconds' => 120]);
+        $second = $template->createItem('Interview 2');
+        $second->update(['allotted_seconds' => 60]);
+
+        $component = Livewire::test('pages::vmix-data')->call('showNext')->call('bumpCurrentTimer', 60);
+
+        $first->refresh();
+        $this->assertSame(120, $first->allotted_seconds);
+        $this->assertTrue(now()->addMinute()->equalTo($first->on_air_at));
+        $this->assertTrue(now()->addSeconds(180)->equalTo($first->timerEndsAt()));
+        $this->assertSame(240, VmixSection::remainingUntilEndOfShow($first, VmixSection::query()->runOfShow()->get()));
+        $component->assertSee('Interview 1 · 2:00')->assertSee('4:00')->assertSee('3:04:00 PM');
+    }
+
+    public function test_bumping_the_current_timer_subtracts_a_minute(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $this->freezeSecond();
+        $template = VmixSection::factory()->template()->create();
+        $first = $template->createItem('Interview 1');
+        $first->update(['allotted_seconds' => 180]);
+        $template->createItem('Interview 2')->update(['allotted_seconds' => 60]);
+
+        Livewire::test('pages::vmix-data')->call('showNext')->call('bumpCurrentTimer', -60);
+
+        $first->refresh();
+        $this->assertSame(180, $first->allotted_seconds);
+        $this->assertTrue(now()->subMinute()->equalTo($first->on_air_at));
+        $this->assertTrue(now()->addSeconds(120)->equalTo($first->timerEndsAt()));
+        $this->assertSame(180, VmixSection::remainingUntilEndOfShow($first, VmixSection::query()->runOfShow()->get()));
+    }
+
+    public function test_subtracting_a_minute_with_under_a_minute_left_advances_the_run_of_show(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $this->freezeSecond();
+        $template = VmixSection::factory()->template()->create(['key' => 'interview']);
+        VmixField::factory()->for(VmixGroup::factory()->for($template, 'section'), 'group')->create(['key' => 'guest', 'value' => 'Max']);
+        $first = $template->createItem('Interview 1');
+        $first->update(['allotted_seconds' => 30]);
+        $second = $template->createItem('Interview 2');
+        $this->itemField($second, 'guest')->update(['value' => 'Tim', 'live_value' => 'Tim']);
+
+        Livewire::test('pages::vmix-data')->call('showNext')->call('bumpCurrentTimer', -60);
+
+        $this->assertFalse($first->refresh()->on_air);
+        $this->assertTrue($second->refresh()->on_air);
+        $this->assertSame((string) $second->id, Setting::get(Setting::ShowCurrentItem));
+        $this->getJson(route('feeds.data'))->assertExactJson(['interview' => [['guest' => 'Tim']]]);
+    }
+
+    public function test_bumping_does_nothing_without_a_current_timer_or_with_invalid_seconds(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $this->freezeSecond();
+        $template = VmixSection::factory()->template()->create();
+        $first = $template->createItem('Interview 1');
+        $first->update(['allotted_seconds' => 120]);
+
+        Livewire::test('pages::vmix-data')->call('bumpCurrentTimer', 60);
+
+        $this->assertNull($first->refresh()->on_air_at);
+
+        $component = Livewire::test('pages::vmix-data')->call('showNext');
+        $startedAt = $first->refresh()->on_air_at;
+
+        $component->call('bumpCurrentTimer', 1)->call('bumpCurrentTimer', 45)->call('bumpCurrentTimer', 0);
+
+        $this->assertTrue($startedAt->equalTo($first->refresh()->on_air_at));
+        $this->assertSame(120, $first->allotted_seconds);
+    }
+
+    public function test_bumping_the_current_timer_accepts_thirty_seconds_and_five_minutes(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $this->travelTo('2026-10-29 15:00:00');
+        $template = VmixSection::factory()->template()->create();
+        $first = $template->createItem('Interview 1');
+        $first->update(['allotted_seconds' => 120]);
+        $template->createItem('Interview 2')->update(['allotted_seconds' => 60]);
+
+        $component = Livewire::test('pages::vmix-data')->call('showNext')->call('bumpCurrentTimer', 30);
+
+        $first->refresh();
+        $this->assertSame(120, $first->allotted_seconds);
+        $this->assertTrue(now()->addSeconds(30)->equalTo($first->on_air_at));
+        $this->assertSame(210, VmixSection::remainingUntilEndOfShow($first, VmixSection::query()->runOfShow()->get()));
+        $component->assertSee('3:03:30 PM');
+
+        $component->call('bumpCurrentTimer', 300);
+        $first->refresh();
+        $this->assertTrue(now()->addSeconds(330)->equalTo($first->on_air_at));
+        $this->assertSame(510, VmixSection::remainingUntilEndOfShow($first, VmixSection::query()->runOfShow()->get()));
+        $component->assertSee('3:08:30 PM');
+    }
+
     public function test_descriptions_save_as_a_bulleted_list_and_stay_out_of_the_master_file(): void
     {
         $this->actingAs(User::factory()->create());

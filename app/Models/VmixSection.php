@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
 /**
@@ -31,6 +32,17 @@ class VmixSection extends Model
     public const DescriptionLineLimit = 20;
 
     public const DefaultAllottedSeconds = 60;
+
+    /**
+     * Operator bump sizes for the current timer, in seconds.
+     *
+     * @var array<int, array{label: string, phrase: string}>
+     */
+    public const TimerBumps = [
+        30 => ['label' => '30s', 'phrase' => '30 seconds'],
+        60 => ['label' => '1m', 'phrase' => '1 minute'],
+        300 => ['label' => '5m', 'phrase' => '5 minutes'],
+    ];
 
     /**
      * @return array<string, string>
@@ -255,6 +267,59 @@ class VmixSection extends Model
     public static function formatSeconds(int $seconds): string
     {
         return sprintf('%d:%02d', intdiv($seconds, 60), $seconds % 60);
+    }
+
+    /**
+     * A remaining show length as m:ss, or h:mm:ss when at least an hour. Overtime is prefixed with +.
+     */
+    public static function formatShowDuration(int $seconds): string
+    {
+        $over = $seconds < 0;
+        $seconds = abs($seconds);
+        $formatted = $seconds >= 3600
+            ? sprintf('%d:%02d:%02d', intdiv($seconds, 3600), intdiv($seconds, 60) % 60, $seconds % 60)
+            : static::formatSeconds($seconds);
+
+        return $over ? '+'.$formatted : $formatted;
+    }
+
+    /**
+     * Allotted seconds of every run-of-show entry after the current one, or the full planned length when nothing is current.
+     *
+     * @param  Collection<int, self>  $runOfShow
+     */
+    public static function allottedSecondsAfter(?self $current, Collection $runOfShow): int
+    {
+        $entries = $runOfShow->values();
+
+        if ($current === null) {
+            return (int) $entries->sum(fn (self $entry): int => $entry->allottedSeconds());
+        }
+
+        $index = $entries->search(fn (self $entry): bool => $entry->id === $current->id);
+
+        if ($index === false) {
+            return (int) $entries->sum(fn (self $entry): int => $entry->allottedSeconds());
+        }
+
+        return (int) $entries->slice($index + 1)->sum(fn (self $entry): int => $entry->allottedSeconds());
+    }
+
+    /**
+     * Seconds left until the last run-of-show entry ends: leftover on the current entry plus allotted times after it.
+     * With nothing current, this is the full planned length. After the last item finishes, this is 0.
+     *
+     * @param  Collection<int, self>  $runOfShow
+     */
+    public static function remainingUntilEndOfShow(?self $current, Collection $runOfShow): int
+    {
+        $laterSeconds = static::allottedSecondsAfter($current, $runOfShow);
+
+        if ($current === null || $current->timerEndsAt() === null) {
+            return $laterSeconds;
+        }
+
+        return $current->timerEndsAt()->getTimestamp() - now()->getTimestamp() + $laterSeconds;
     }
 
     /**

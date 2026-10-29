@@ -185,6 +185,21 @@ new #[Title('vMix Data')] class extends Component
         return $entries->get($currentIndex === false ? 0 : $currentIndex + 1);
     }
 
+    /**
+     * Allotted seconds after the current entry, or the full planned length when nothing is current.
+     */
+    #[Computed]
+    public function futureSeconds(): int
+    {
+        return VmixSection::allottedSecondsAfter($this->liveTimer ?? $this->currentEntry, $this->runOfShow);
+    }
+
+    #[Computed]
+    public function endOfShowRemaining(): int
+    {
+        return VmixSection::remainingUntilEndOfShow($this->liveTimer ?? $this->currentEntry, $this->runOfShow);
+    }
+
     #[Computed]
     public function drivers(): Collection
     {
@@ -331,12 +346,38 @@ new #[Title('vMix Data')] class extends Component
         $previousItemId = $this->currentItemId;
 
         VmixSection::finishExpiredBreaks();
-        unset($this->currentItemId, $this->liveTimer);
+        unset($this->currentItemId, $this->liveTimer, $this->currentEntry, $this->runOfShow, $this->upNext, $this->futureSeconds, $this->endOfShowRemaining);
 
         if ($this->currentItemId && $this->currentItemId !== $previousItemId) {
             $this->selectSection($this->currentItemId);
         } else {
             $this->loadSection();
+        }
+    }
+
+    /**
+     * Add or subtract an allowed bump on the current allotted countdown without changing the planned time.
+     */
+    public function bumpCurrentTimer(int $seconds): void
+    {
+        if ($seconds === 0 || ! array_key_exists(abs($seconds), VmixSection::TimerBumps)) {
+            return;
+        }
+
+        $timer = $this->liveTimer;
+
+        if ($timer === null || $timer->on_air_at === null) {
+            return;
+        }
+
+        $timer->update([
+            'on_air_at' => $timer->on_air_at->copy()->addSeconds($seconds),
+        ]);
+
+        unset($this->runOfShow, $this->liveTimer, $this->currentEntry, $this->futureSeconds, $this->endOfShowRemaining);
+
+        if ($seconds < 0 && $timer->fresh()?->timerHasEnded()) {
+            $this->finishBreak();
         }
     }
 
@@ -1038,8 +1079,8 @@ new #[Title('vMix Data')] class extends Component
 
 <div class="space-y-4">
     <div class="sticky top-0 z-20">
-        <div class="overflow-hidden rounded-lg bg-slate-950 text-white shadow-sm ring-1 ring-slate-800">
-            <div class="flex items-center gap-2 border-b border-slate-800 px-2 py-1">
+        <div class="rounded-lg bg-slate-950 text-white shadow-sm ring-1 ring-slate-800">
+            <div class="flex items-center gap-2 overflow-hidden rounded-t-lg border-b border-slate-800 px-2 py-1">
                 <span class="text-[9px] font-black tracking-[0.18em] text-amber-400 uppercase">vMix</span>
                 <a href="{{ route('feeds.data') }}" target="_blank" class="min-w-0 flex-1 truncate font-mono text-[11px] text-slate-400 hover:text-white">{{ route('feeds.data') }}</a>
                 <button
@@ -1055,9 +1096,21 @@ new #[Title('vMix Data')] class extends Component
             offset: {{ now()->getTimestampMs() }} - Date.now(),
             now: Date.now(),
             endsAt: @js($liveTimer?->timerEndsAt()?->getTimestampMs()),
+            futureSeconds: {{ $this->futureSeconds }},
             get time() { return new Date(this.now + this.offset).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) },
-            get remaining() { return Math.round((this.endsAt - this.now - this.offset) / 1000) },
+            get remaining() { return this.endsAt ? Math.round((this.endsAt - this.now - this.offset) / 1000) : 0 },
             get countdown() { const s = Math.abs(this.remaining); return (this.remaining < 0 ? '+' : '') + Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') },
+            formatDuration(total) {
+                const over = total < 0;
+                const s = Math.abs(total);
+                const body = s >= 3600
+                    ? Math.floor(s / 3600) + ':' + String(Math.floor((s % 3600) / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0')
+                    : Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+                return (over ? '+' : '') + body;
+            },
+            get showRemaining() { return this.remaining + this.futureSeconds },
+            get showCountdown() { return this.formatDuration(this.showRemaining) },
+            get showEndsAt() { return new Date(this.now + this.offset + this.showRemaining * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }) },
             finished: false,
             init() {
                 this.timer = setInterval(() => {
@@ -1070,11 +1123,21 @@ new #[Title('vMix Data')] class extends Component
             },
             destroy() { clearInterval(this.timer) },
         }"
-            class="grid grid-cols-1 gap-1 p-1 sm:grid-cols-2 xl:grid-cols-[auto_minmax(8rem,14rem)_minmax(12rem,1fr)_minmax(10rem,16rem)]"
+            class="grid grid-cols-1 gap-1 p-1 sm:grid-cols-2 xl:grid-cols-[auto_auto_auto_minmax(8rem,14rem)_minmax(12rem,1fr)_minmax(12rem,18rem)]"
     >
         <div class="flex items-baseline gap-2 rounded bg-slate-900 px-2 py-1 ring-1 ring-slate-800">
             <span class="text-[9px] font-black tracking-[0.16em] text-slate-500 uppercase">Time</span>
             <span x-text="time" class="font-mono text-lg leading-none font-black tabular-nums"></span>
+        </div>
+
+        <div class="flex min-w-0 items-baseline gap-2 rounded bg-slate-900 px-2 py-1 ring-1 ring-slate-800">
+            <span class="shrink-0 text-[9px] font-black tracking-[0.16em] text-slate-500 uppercase">End of show</span>
+            <span x-text="showCountdown" class="font-mono text-lg leading-none font-black tabular-nums">{{ VmixSection::formatShowDuration($this->endOfShowRemaining) }}</span>
+        </div>
+
+        <div class="flex min-w-0 items-baseline gap-2 rounded bg-slate-900 px-2 py-1 ring-1 ring-slate-800">
+            <span class="shrink-0 text-[9px] font-black tracking-[0.16em] text-slate-500 uppercase">Done at</span>
+            <span x-text="showEndsAt" class="font-mono text-lg leading-none font-black tabular-nums">{{ now()->addSeconds($this->endOfShowRemaining)->format('g:i:s A') }}</span>
         </div>
 
         @php($currentEntry = $this->currentEntry)
@@ -1112,7 +1175,7 @@ new #[Title('vMix Data')] class extends Component
 
         @if ($liveTimer)
             <div
-                class="flex min-w-0 items-center justify-between gap-2 rounded px-2 py-1 transition-colors duration-300 sm:col-span-2 xl:col-span-1"
+                class="flex min-w-0 flex-col gap-1 rounded px-2 py-1 transition-colors duration-300 sm:col-span-2 xl:col-span-1"
                 x-bind:class="{
                     'bg-slate-900 text-white ring-1 ring-slate-800': remaining > 60,
                     'bg-lime-400 text-slate-950': remaining <= 60 && remaining > 45,
@@ -1123,8 +1186,38 @@ new #[Title('vMix Data')] class extends Component
                     'bg-red-600 text-white animate-pulse': remaining <= 5,
                 }"
             >
-                <span class="min-w-0 truncate text-[9px] font-black tracking-[0.16em] uppercase opacity-80">{{ $liveTimer->name }} · {{ VmixSection::formatSeconds($liveTimer->allottedSeconds()) }} <span x-text="remaining < 0 ? 'Over' : 'Remaining'" class="font-bold tracking-normal normal-case"></span></span>
-                <span x-text="countdown" class="shrink-0 font-mono text-xl leading-none font-black tabular-nums"></span>
+                <div class="flex min-w-0 items-center justify-between gap-2">
+                    <span class="min-w-0 truncate text-[9px] font-black tracking-[0.16em] uppercase opacity-80">{{ $liveTimer->name }} · {{ VmixSection::formatSeconds($liveTimer->allottedSeconds()) }} <span x-text="remaining < 0 ? 'Over' : 'Remaining'" class="font-bold tracking-normal normal-case"></span></span>
+                    <span x-text="countdown" class="shrink-0 font-mono text-xl leading-none font-black tabular-nums"></span>
+                </div>
+                <div class="flex items-center justify-between gap-1">
+                    <div class="flex items-center gap-0.5">
+                    @foreach (array_reverse(VmixSection::TimerBumps, preserve_keys: true) as $seconds => $bump)
+                        <button
+                            type="button"
+                            wire:click="bumpCurrentTimer(-{{ $seconds }})"
+                            title="Subtract {{ $bump['phrase'] }}"
+                            class="group relative rounded bg-white/15 px-1.5 py-0.5 text-[10px] font-black ring-1 ring-current/40 transition-colors hover:bg-red-600 hover:text-white hover:ring-red-400"
+                        >
+                            -{{ $bump['label'] }}
+                            <span @class(['pointer-events-none absolute top-full z-30 mt-1 hidden rounded bg-slate-950 px-1.5 py-0.5 text-[10px] font-bold tracking-normal text-white ring-1 ring-white/20 whitespace-nowrap group-hover:block', 'left-0' => $loop->first, 'left-1/2 -translate-x-1/2' => ! $loop->first])>Subtract {{ $bump['phrase'] }}</span>
+                        </button>
+                    @endforeach
+                    </div>
+                    <div class="flex items-center gap-0.5">
+                    @foreach (VmixSection::TimerBumps as $seconds => $bump)
+                        <button
+                            type="button"
+                            wire:click="bumpCurrentTimer({{ $seconds }})"
+                            title="Add {{ $bump['phrase'] }}"
+                            class="group relative rounded bg-white/15 px-1.5 py-0.5 text-[10px] font-black ring-1 ring-current/40 transition-colors hover:bg-green-700 hover:text-white hover:ring-green-400"
+                        >
+                            +{{ $bump['label'] }}
+                            <span @class(['pointer-events-none absolute top-full z-30 mt-1 hidden rounded bg-slate-950 px-1.5 py-0.5 text-[10px] font-bold tracking-normal text-white ring-1 ring-white/20 whitespace-nowrap group-hover:block', 'right-0' => $loop->last, 'left-1/2 -translate-x-1/2' => ! $loop->last])>Add {{ $bump['phrase'] }}</span>
+                        </button>
+                    @endforeach
+                    </div>
+                </div>
             </div>
         @else
             <div class="flex min-w-0 items-center gap-2 rounded bg-slate-900 px-2 py-1 ring-1 ring-slate-800 sm:col-span-2 xl:col-span-1">
