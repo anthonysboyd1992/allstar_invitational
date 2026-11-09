@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Http\Controllers\TimingPullerDownloadController;
 use App\Models\Competitor;
 use App\Models\Race;
 use App\Models\RaceType;
@@ -9,6 +10,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Tests\TestCase;
+use ZipArchive;
 
 class TimingPageTest extends TestCase
 {
@@ -34,7 +36,25 @@ class TimingPageTest extends TestCase
             ->assertSee(route('exports.transponders', $heat2), false)
             ->assertSee(route('exports.laps', $heat2), false)
             ->assertSee(route('exports.race-zip', $heat2), false)
-            ->assertSee('No laps');
+            ->assertSee('No laps')
+            ->assertSee('Download Windows puller')
+            ->assertSee(route('exports.timing-puller'), false);
+    }
+
+    public function test_windows_puller_zip_downloads_when_the_file_exists(): void
+    {
+        $this->withPullerZip(function (): void {
+            $this->get(route('exports.timing-puller'))
+                ->assertOk()
+                ->assertDownload(TimingPullerDownloadController::DownloadName);
+        });
+    }
+
+    public function test_windows_puller_zip_returns_404_when_missing(): void
+    {
+        $this->withoutPullerZip(function (): void {
+            $this->get(route('exports.timing-puller'))->assertNotFound();
+        });
     }
 
     public function test_race_board_no_longer_has_timing_downloads(): void
@@ -96,5 +116,54 @@ class TimingPageTest extends TestCase
 
         $this->assertSame(8, $first->refresh()->laps);
         $this->assertSame(8, $second->refresh()->laps);
+    }
+
+    /**
+     * @param  callable(): void  $callback
+     */
+    private function withPullerZip(callable $callback): void
+    {
+        $this->swapPullerZip(function () use ($callback): void {
+            $zip = new ZipArchive;
+            $opened = $zip->open(TimingPullerDownloadController::zipPath(), ZipArchive::CREATE | ZipArchive::OVERWRITE);
+            $this->assertTrue($opened === true);
+            $zip->addFromString('Allstar Invitational Race Manager Puller.exe', 'exe');
+            $zip->close();
+
+            $callback();
+        });
+    }
+
+    /**
+     * @param  callable(): void  $callback
+     */
+    private function withoutPullerZip(callable $callback): void
+    {
+        $this->swapPullerZip($callback);
+    }
+
+    /**
+     * @param  callable(): void  $callback
+     */
+    private function swapPullerZip(callable $callback): void
+    {
+        $path = TimingPullerDownloadController::zipPath();
+        $backup = $path.'.test-backup';
+
+        if (is_file($path)) {
+            rename($path, $backup);
+        }
+
+        try {
+            $callback();
+        } finally {
+            if (is_file($path)) {
+                unlink($path);
+            }
+
+            if (is_file($backup)) {
+                rename($backup, $path);
+            }
+        }
     }
 }

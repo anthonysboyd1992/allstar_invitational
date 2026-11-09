@@ -1,0 +1,38 @@
+{
+    "name": "timing-pull",
+    "productName": "Allstar Invitational Race Manager Puller",
+    "version": "1.0.0",
+    "description": "Pull lineup CSV and DAT files from the Allstar Invitational Timing File Feed.",
+    "main": "main.js",
+    "private": true,
+    "scripts": {
+        "start": "electron .",
+        "dist": "electron-builder --win portable --x64 --publish never && node package-zip.js"
+    },
+    "build": {
+        "appId": "com.allstar.timing-pull",
+        "productName": "Allstar Invitational Race Manager Puller",
+        "icon": "build/icon.png",
+        "directories": {
+            "output": "dist"
+        },
+        "files": [
+            "main.js",
+            "preload.js",
+            "renderer/**/*"
+        ],
+        "win": {
+            "artifactName": "Allstar Invitational Race Manager Puller.exe",
+            "target": [
+                {
+                    "target": "portable",
+                    "arch": ["x64"]
+                }
+            ]
+        }
+    },
+    "devDependencies": {
+        "electron": "^39.0.0",
+        "electron-builder": "^26.0.0"
+    }
+}

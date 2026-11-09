@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'">
+    <title>Allstar Invitational Race Manager Puller</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #0f172a;
+            --panel: #1e293b;
+            --line: #334155;
+            --text: #e2e8f0;
+            --muted: #94a3b8;
+            --accent: #f59e0b;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font: 14px/1.45 system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+        }
+
+        main {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            max-width: 580px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .brand img {
+            width: 88px;
+            height: auto;
+            flex-shrink: 0;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 900;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            line-height: 1.2;
+        }
+
+        h1 span {
+            display: block;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            color: var(--accent);
+        }
+
+        p { margin: 0; color: var(--muted); }
+
+        .lede { margin-top: 10px; }
+
+        label {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        input[type="url"],
+        input[type="text"] {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: #0b1220;
+            color: var(--text);
+            padding: 8px 10px;
+            font: 13px/1.4 ui-monospace, monospace;
+        }
+
+        input[type="url"]:focus,
+        input[type="text"]:focus {
+            outline: 2px solid var(--accent);
+            outline-offset: 1px;
+        }
+
+        .row { display: flex; gap: 8px; }
+
+        .row input { flex: 1; min-width: 0; }
+
+        button {
+            border: 0;
+            border-radius: 6px;
+            background: #f8fafc;
+            color: #0f172a;
+            font: 700 13px/1.2 system-ui, sans-serif;
+            padding: 9px 12px;
+            cursor: pointer;
+        }
+
+        button.secondary {
+            background: transparent;
+            color: var(--text);
+            box-shadow: inset 0 0 0 1px var(--line);
+        }
+
+        button:disabled { opacity: 0.55; cursor: wait; }
+
+        .pull {
+            background: var(--accent);
+            color: #111827;
+            font-size: 15px;
+            padding: 12px 14px;
+        }
+
+        .list-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 6px;
+        }
+
+        ul.races {
+            margin: 0;
+            padding: 8px;
+            min-height: 180px;
+            max-height: 320px;
+            overflow: auto;
+            border-radius: 8px;
+            background: var(--panel);
+            box-shadow: inset 0 0 0 1px var(--line);
+            list-style: none;
+        }
+
+        ul.races li { margin: 0; }
+
+        .type-heading,
+        .race {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 10px;
+            padding: 7px 8px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 0;
+            text-transform: none;
+            color: var(--text);
+            cursor: pointer;
+        }
+
+        .type-heading {
+            margin-top: 6px;
+            color: var(--muted);
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 0.04em;
+        }
+
+        .race { font-weight: 600; padding-left: 28px; }
+
+        .type-heading:hover,
+        .race:hover { background: #334155; }
+
+        input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            accent-color: var(--accent);
+        }
+
+        .laps {
+            margin-left: auto;
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--accent);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .files {
+            font-size: 12px;
+            font-weight: 400;
+            color: var(--muted);
+            font-family: ui-monospace, monospace;
+        }
+
+        .empty { color: var(--muted); padding: 10px 8px; }
+
+        #status { min-height: 1.4em; color: var(--muted); }
+
+        #status.error { color: #fca5a5; }
+
+        #status.ok { color: #86efac; }
+    </style>
+</head>
+<body>
+    <main>
+        <div>
+            <div class="brand">
+                <img src="logo.png" alt="Allstar Invitational">
+                <h1>Allstar Invitational<span>Race Manager Puller</span></h1>
+            </div>
+            <p class="lede">Select a type, individual races, or all. Pull overwrites only those files. Only races set to Lineups come down.</p>
+        </div>
+
+        <label>
+            Timing File Feed
+            <input id="feedUrl" type="url" spellcheck="false" placeholder="https://allstar.test/timing/lineups.json?token=…">
+        </label>
+
+        <label>
+            Assign Folder
+            <span class="row">
+                <input id="assignFolder" type="text" spellcheck="false" placeholder="D:\Scoring\Assign">
+                <button id="chooseFolder" class="secondary" type="button">Choose…</button>
+            </span>
+        </label>
+
+        <div>
+            <label>Races</label>
+            <div class="list-actions">
+                <button id="refresh" class="secondary" type="button">Refresh list</button>
+                <button id="selectAll" class="secondary" type="button">Select all</button>
+                <button id="selectNone" class="secondary" type="button">Select none</button>
+            </div>
+            <ul id="races" class="races"><li class="empty">Refresh the list to see races you can pull.</li></ul>
+        </div>
+
+        <button id="pull" class="pull" type="button">Pull Lineup files</button>
+
+        <p id="status"></p>
+    </main>
+    <script src="renderer.js"></script>
+</body>
+</html>

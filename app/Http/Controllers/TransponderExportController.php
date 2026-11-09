@@ -6,6 +6,7 @@ use App\Models\Competitor;
 use App\Models\Race;
 use App\Models\RaceType;
 use App\Models\Setting;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -105,6 +106,16 @@ class TransponderExportController extends Controller
             : 'Timing files.zip';
 
         return $this->zipDownload($zipName, $files);
+    }
+
+    /**
+     * JSON of CSV and DAT files for the Timing File Feed. Only races set to Lineups are included.
+     */
+    public function lineups(Request $request): JsonResponse
+    {
+        $this->authorizeLineupFeed($request);
+
+        return response()->json(['races' => $this->lineupSessions()]);
     }
 
     /**
@@ -231,5 +242,92 @@ class TransponderExportController extends Controller
         $name = trim(preg_replace('/[\\\\\/:*?"<>|]+/', '-', $name));
 
         return $name === '' ? 'Race' : $name;
+    }
+
+    private function authorizeLineupFeed(Request $request): void
+    {
+        $expected = (string) Setting::get(Setting::TimingFeedToken, '');
+        $provided = $request->string('token')->toString();
+
+        abort_unless(filled($expected) && filled($provided) && hash_equals($expected, $provided), 403);
+    }
+
+    /**
+     * @return list<array{key: string, name: string, type: string, laps: int, files: list<array{name: string, contents: string}>}>
+     */
+    private function lineupSessions(): array
+    {
+        $sessions = [];
+        $types = RaceType::query()
+            ->with(['races.entries.competitor'])
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get()
+            ->filter(fn (RaceType $raceType): bool => $raceType->races->isNotEmpty());
+
+        foreach ($types as $raceType) {
+            if ($raceType->combines_groups) {
+                if ($this->typeShouldSkipTimingPull($raceType)) {
+                    continue;
+                }
+
+                $sessions[] = $this->sessionFromFiles(
+                    'type-'.$raceType->id,
+                    $raceType->name,
+                    $raceType->name,
+                    $raceType->sessionLaps() ?? 0,
+                    $this->typeFiles($raceType),
+                );
+
+                continue;
+            }
+
+            foreach ($raceType->races as $race) {
+                if ($this->raceShouldSkipTimingPull($race)) {
+                    continue;
+                }
+
+                $sessions[] = $this->sessionFromFiles(
+                    'race-'.$race->id,
+                    $race->name,
+                    $raceType->name,
+                    $race->laps ?? 0,
+                    $this->raceFiles($race),
+                );
+            }
+        }
+
+        return $sessions;
+    }
+
+    /**
+     * @param  array<string, string>  $files
+     * @return array{key: string, name: string, type: string, laps: int, files: list<array{name: string, contents: string}>}
+     */
+    private function sessionFromFiles(string $key, string $name, string $type, int $laps, array $files): array
+    {
+        return [
+            'key' => $key,
+            'name' => $name,
+            'type' => $type,
+            'laps' => $laps,
+            'files' => collect($files)
+                ->map(fn (string $contents, string $fileName): array => [
+                    'name' => $fileName,
+                    'contents' => $contents,
+                ])
+                ->values()
+                ->all(),
+        ];
+    }
+
+    private function raceShouldSkipTimingPull(Race $race): bool
+    {
+        return ! $race->isReadyForTimingPull();
+    }
+
+    private function typeShouldSkipTimingPull(RaceType $raceType): bool
+    {
+        return $raceType->races->contains(fn (Race $race): bool => $this->raceShouldSkipTimingPull($race));
     }
 }

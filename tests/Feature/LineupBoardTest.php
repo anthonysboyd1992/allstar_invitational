@@ -8,6 +8,7 @@ use App\Models\RaceType;
 use App\Models\RaceTypeTransferRule;
 use App\Models\Setting;
 use App\Models\User;
+use App\TimingStatus;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -34,7 +35,31 @@ class LineupBoardTest extends TestCase
             ->assertSee('min-h-0 flex-1 overflow-y-auto', false)
             ->assertSee('sticky top-0 z-20 bg-slate-100', false)
             ->assertDontSee('Assign by weight')
-            ->assertDontSee('toggleAssignsByPill');
+            ->assertDontSee('toggleAssignsByPill')
+            ->assertSee('Pending');
+    }
+
+    public function test_a_race_timing_status_can_be_set_to_lineups(): void
+    {
+        $race = Race::factory()->create(['name' => 'Heat 1']);
+
+        Livewire::test('pages::lineups')
+            ->call('updateTimingStatus', $race->id, 'lineups');
+
+        $this->assertSame(TimingStatus::Lineups, $race->fresh()->timing_status);
+    }
+
+    public function test_one_file_types_share_timing_status_across_every_group(): void
+    {
+        $type = RaceType::factory()->create(['combines_groups' => true]);
+        $first = Race::factory()->for($type)->create(['name' => 'Hotlaps 1']);
+        $second = Race::factory()->for($type)->create(['name' => 'Hotlaps 2']);
+
+        Livewire::test('pages::lineups')
+            ->call('updateTimingStatus', $first->id, 'lineups');
+
+        $this->assertSame(TimingStatus::Lineups, $first->fresh()->timing_status);
+        $this->assertSame(TimingStatus::Lineups, $second->fresh()->timing_status);
     }
 
     public function test_lineup_cards_show_a_drivers_pill_number_when_the_type_option_is_on(): void

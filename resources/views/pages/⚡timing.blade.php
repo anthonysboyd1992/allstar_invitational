@@ -104,6 +104,11 @@ new #[Title('Timing')] class extends Component
                 <b>.zip</b> puts both files together. Types marked One file only show that combined file.
             </p>
         </div>
+        <a
+            href="{{ route('exports.timing-puller') }}"
+            download
+            class="rounded-md px-3 py-2 text-sm font-semibold ring-1 ring-slate-300 hover:bg-slate-50"
+        >Download Windows puller</a>
         <button type="button" x-on:click="toggle(allIds)" class="rounded-md px-3 py-2 text-sm font-semibold ring-1 ring-slate-300 hover:bg-slate-50"
             x-text="allIds.every(id => selected.includes(id)) ? 'Select none' : 'Select all'"></button>
         <a

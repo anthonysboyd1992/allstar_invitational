@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\TimingStatus;
 use Database\Factories\RaceFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -11,7 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
-#[Fillable(['race_type_id', 'name', 'lineup_name', 'laps', 'transfers', 'sponsor', 'starting_positions', 'sort_order'])]
+#[Fillable(['race_type_id', 'name', 'lineup_name', 'laps', 'transfers', 'sponsor', 'starting_positions', 'sort_order', 'timing_status'])]
 class Race extends Model
 {
     /** @use HasFactory<RaceFactory> */
@@ -219,6 +220,40 @@ class Race extends Model
             ->filter(fn (RaceEntry $entry): bool => $entry->finish_position !== null)
             ->sortBy('finish_position')
             ->values();
+    }
+
+    /**
+     * At least one driver has a finish, so this race is done for timing files.
+     */
+    public function hasResults(): bool
+    {
+        return $this->entries->contains(
+            fn (RaceEntry $entry): bool => $entry->finish_position !== null,
+        );
+    }
+
+    /**
+     * Only Lineups status is written to the Timing File Feed.
+     */
+    public function isReadyForTimingPull(): bool
+    {
+        return $this->timing_status === TimingStatus::Lineups;
+    }
+
+    /**
+     * One-file types share a timing session, so every group gets the same status.
+     */
+    public function setTimingStatus(TimingStatus $status): void
+    {
+        $this->loadMissing('raceType');
+
+        if ($this->raceType->combines_groups) {
+            $this->raceType->races()->update(['timing_status' => $status]);
+
+            return;
+        }
+
+        $this->update(['timing_status' => $status]);
     }
 
     /**
@@ -543,6 +578,7 @@ class Race extends Model
             'laps' => 'integer',
             'starting_positions' => 'integer',
             'sort_order' => 'integer',
+            'timing_status' => TimingStatus::class,
         ];
     }
 }

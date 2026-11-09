@@ -5,6 +5,7 @@ use App\Http\Controllers\HomeController;
 use App\Http\Controllers\LineupPrintController;
 use App\Http\Controllers\LogoutController;
 use App\Http\Controllers\ResultsPrintController;
+use App\Http\Controllers\TimingPullerDownloadController;
 use App\Http\Controllers\TransponderExportController;
 use App\Http\Controllers\VmixFeedController;
 use Illuminate\Support\Facades\Route;
@@ -42,6 +43,7 @@ Route::middleware('auth')->group(function () {
         Route::get('/exports/types/{raceType}/laps.dat', [TransponderExportController::class, 'typeLaps'])->name('exports.type-laps');
         Route::get('/exports/types/{raceType}/timing.zip', [TransponderExportController::class, 'typeZip'])->name('exports.type-zip');
         Route::get('/exports/timing.zip', [TransponderExportController::class, 'bundle'])->name('exports.timing-zip');
+        Route::get('/exports/timing-puller.zip', TimingPullerDownloadController::class)->name('exports.timing-puller');
     });
 
     Route::post('/logout', LogoutController::class)->name('logout');
@@ -51,3 +53,4 @@ Route::get('/vmix/lineup.json', [VmixFeedController::class, 'lineup'])->name('fe
 Route::get('/vmix/driver.json', [VmixFeedController::class, 'driver'])->name('feeds.driver');
 Route::get('/vmix/data.json', [VmixFeedController::class, 'data'])->name('feeds.data');
 Route::get('/vmix/clear.png', [VmixFeedController::class, 'clear'])->name('feeds.clear');
+Route::get('/timing/lineups.json', [TransponderExportController::class, 'lineups'])->name('feeds.timing-lineups');

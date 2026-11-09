@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use RuntimeException;
 
 #[Fillable(['key', 'value'])]
@@ -51,6 +52,11 @@ class Setting extends Model
     public const TrackLength = 'track_length';
 
     public const DefaultTrackLength = '0.100';
+
+    /**
+     * Token the scoring-PC puller sends as ?token= on the lineup JSON feed.
+     */
+    public const TimingFeedToken = 'timing_feed_token';
 
     public const LetterheadDirectory = 'letterhead';
 
@@ -108,6 +114,28 @@ class Setting extends Model
         }
 
         return number_format($length, 3, '.', '');
+    }
+
+    /**
+     * Token for GET /timing/lineups.json. Created on first use so Settings can show a copyable URL.
+     */
+    public static function timingFeedToken(): string
+    {
+        $token = static::get(self::TimingFeedToken);
+
+        if (filled($token)) {
+            return $token;
+        }
+
+        return static::replaceTimingFeedToken();
+    }
+
+    public static function replaceTimingFeedToken(): string
+    {
+        $token = Str::random(40);
+        static::put(self::TimingFeedToken, $token);
+
+        return $token;
     }
 
     public static function activeDriver(): ?Competitor

@@ -7,6 +7,7 @@ use App\Models\RaceEntry;
 use App\Models\RaceType;
 use App\Models\RaceTypeTransferRule;
 use App\Models\Setting;
+use App\TimingStatus;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
@@ -527,6 +528,19 @@ new #[Title('Races & Lineups')] class extends Component
             $race->syncLineup($race->lineupIds());
         }
 
+        $this->version++;
+    }
+
+    public function updateTimingStatus(int $raceId, string $status): void
+    {
+        $timingStatus = TimingStatus::tryFrom($status);
+
+        if ($timingStatus === null) {
+            return;
+        }
+
+        Race::query()->with('raceType')->findOrFail($raceId)->setTimingStatus($timingStatus);
+        unset($this->raceTypes);
         $this->version++;
     }
 
@@ -1301,6 +1315,15 @@ new #[Title('Races & Lineups')] class extends Component
                             <div class="border-b border-slate-100 px-3 py-2">
                                 <div class="flex flex-wrap items-center gap-2">
                                     <span class="min-w-0 flex-1 truncate font-bold">{{ $race->name }}</span>
+                                    <select
+                                        wire:click.stop
+                                        wire:change="updateTimingStatus({{ $race->id }}, $event.target.value)"
+                                        class="rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-900"
+                                    >
+                                        @foreach (TimingStatus::cases() as $status)
+                                            <option value="{{ $status->value }}" @selected($race->timing_status === $status)>{{ $status->label() }}</option>
+                                        @endforeach
+                                    </select>
                                     <span class="text-xs text-slate-400">
                                         {{ $race->entries->count() }}@if ($race->hasFixedField())/{{ $race->starting_positions }}@endif drivers
                                     </span>

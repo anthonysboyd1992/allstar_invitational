@@ -1,7 +1,9 @@
 <?php
 
+use App\Models\Race;
 use App\Models\RaceEntry;
 use App\Models\RaceType;
+use App\TimingStatus;
 use App\Services\TransferCalculator;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
@@ -41,6 +43,21 @@ new #[Title('Results')] class extends Component
 
         $next = ((int) $entry->race->entries->max('finish_position')) + 1;
         $entry->update(['finish_position' => $next]);
+        $entry->race->setTimingStatus(TimingStatus::Complete);
+        unset($this->raceTypes);
+        $this->version++;
+    }
+
+    public function updateTimingStatus(int $raceId, string $status): void
+    {
+        $timingStatus = TimingStatus::tryFrom($status);
+
+        if ($timingStatus === null) {
+            return;
+        }
+
+        Race::query()->with('raceType')->findOrFail($raceId)->setTimingStatus($timingStatus);
+        unset($this->raceTypes);
         $this->version++;
     }
 
@@ -274,9 +291,19 @@ new #[Title('Results')] class extends Component
             <div class="grid grid-cols-1 gap-3 xl:grid-cols-2">
                 @forelse ($raceType->racesInProgramOrder() as $race)
                     <article wire:key="results-race-{{ $race->id }}-{{ $version }}" class="overflow-hidden rounded-sm bg-white ring-2 ring-slate-800">
-                        <div class="flex items-center justify-between bg-slate-900 px-3 py-2 text-white">
+                        <div class="flex items-center justify-between gap-2 bg-slate-900 px-3 py-2 text-white">
                             <h3 class="text-sm font-black uppercase">{{ $race->name }}</h3>
-                            <span class="bg-[#ee6426] px-1.5 py-0.5 font-mono text-xs font-black text-white">{{ $race->scoredEntries()->count() }}/{{ $race->entries->count() }}</span>
+                            <span class="flex items-center gap-2">
+                                <select
+                                    wire:change="updateTimingStatus({{ $race->id }}, $event.target.value)"
+                                    class="rounded bg-white px-1.5 py-0.5 text-[11px] font-bold text-slate-900"
+                                >
+                                    @foreach (TimingStatus::cases() as $status)
+                                        <option value="{{ $status->value }}" @selected($race->timing_status === $status)>{{ $status->label() }}</option>
+                                    @endforeach
+                                </select>
+                                <span class="bg-[#ee6426] px-1.5 py-0.5 font-mono text-xs font-black text-white">{{ $race->scoredEntries()->count() }}/{{ $race->entries->count() }}</span>
+                            </span>
                         </div>
                         @if ($race->entries->isEmpty())
                             <p class="px-3 py-4 text-sm text-slate-400">No drivers in this race.</p>

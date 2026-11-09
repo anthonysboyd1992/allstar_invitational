@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Race;
+use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -16,7 +17,7 @@ class AuthenticationTest extends TestCase
     {
         $race = Race::factory()->create();
 
-        foreach ([route('competitors'), route('competitors.print'), route('competitors.print-announcer'), route('lineups'), route('lineups.print'), route('results'), route('results.print'), route('vmix'), route('settings'), route('exports.transponders', $race), route('exports.laps', $race), route('exports.race-zip', $race), route('exports.type-transponders', $race->raceType), route('exports.type-laps', $race->raceType), route('exports.type-zip', $race->raceType), route('exports.timing-zip', ['races' => $race->id])] as $url) {
+        foreach ([route('competitors'), route('competitors.print'), route('competitors.print-announcer'), route('lineups'), route('lineups.print'), route('results'), route('results.print'), route('vmix'), route('settings'), route('exports.transponders', $race), route('exports.laps', $race), route('exports.race-zip', $race), route('exports.type-transponders', $race->raceType), route('exports.type-laps', $race->raceType), route('exports.type-zip', $race->raceType), route('exports.timing-zip', ['races' => $race->id]), route('exports.timing-puller')] as $url) {
             $this->get($url)->assertRedirect(route('login'));
         }
     }
@@ -25,6 +26,15 @@ class AuthenticationTest extends TestCase
     {
         $this->get(route('feeds.lineup'))->assertOk();
         $this->get(route('feeds.driver'))->assertOk();
+    }
+
+    public function test_guests_can_fetch_timing_lineup_json_with_a_token(): void
+    {
+        Setting::put(Setting::TimingFeedToken, 'secret-token');
+
+        $this->get(route('feeds.timing-lineups', ['token' => 'secret-token']))
+            ->assertOk()
+            ->assertExactJson(['races' => []]);
     }
 
     public function test_login_page_renders(): void

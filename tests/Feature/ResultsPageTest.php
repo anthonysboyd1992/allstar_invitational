@@ -7,6 +7,7 @@ use App\Models\Race;
 use App\Models\RaceType;
 use App\Models\RaceTypeTransferRule;
 use App\Models\User;
+use App\TimingStatus;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
 use Livewire\Livewire;
@@ -53,6 +54,17 @@ class ResultsPageTest extends TestCase
         $this->assertSame(3, $entries[1]->fresh()->finish_position);
         $this->assertSame(0, $program['dash']->entries()->count());
         $this->assertSame(0, $program['feature']->entries()->count());
+        $this->assertSame(TimingStatus::Complete, $program['heat1']->fresh()->timing_status);
+    }
+
+    public function test_results_can_set_a_race_back_to_lineups(): void
+    {
+        $program = $this->heatTransferProgram(score: false);
+
+        Livewire::test('pages::results')
+            ->call('updateTimingStatus', $program['heat1']->id, 'lineups');
+
+        $this->assertSame(TimingStatus::Lineups, $program['heat1']->fresh()->timing_status);
     }
 
     public function test_unscoring_a_driver_closes_the_finish_order(): void

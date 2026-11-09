@@ -181,6 +181,119 @@ class TransponderExportTest extends TestCase
         $this->get(route('exports.timing-zip', ['races' => '0']))->assertNotFound();
     }
 
+    public function test_lineup_json_returns_403_when_no_token_is_provided(): void
+    {
+        Setting::put(Setting::TimingFeedToken, 'secret-token');
+
+        $this->get(route('feeds.timing-lineups'))->assertForbidden();
+    }
+
+    public function test_lineup_json_returns_403_when_the_token_is_wrong(): void
+    {
+        Setting::put(Setting::TimingFeedToken, 'secret-token');
+
+        $this->get(route('feeds.timing-lineups', ['token' => 'nope']))->assertForbidden();
+    }
+
+    public function test_lineup_json_returns_403_when_no_token_has_been_issued(): void
+    {
+        $this->get(route('feeds.timing-lineups', ['token' => 'anything']))->assertForbidden();
+    }
+
+    public function test_lineup_json_matches_csv_and_dat_for_unscored_races(): void
+    {
+        $heat = Race::factory()->lineups()->create(['name' => 'Heat 1', 'laps' => 8, 'sort_order' => 1]);
+        $feature = Race::factory()->lineups()->create(['name' => 'A-Main', 'laps' => 30, 'sort_order' => 2]);
+        $heat->syncLineup([
+            Competitor::factory()->create(['transponder' => '111', 'car_number' => '1', 'last_name' => 'First', 'first_name' => 'Ann'])->id,
+        ]);
+        $feature->syncLineup([
+            Competitor::factory()->create(['transponder' => '222', 'car_number' => '2', 'last_name' => 'Second', 'first_name' => 'Bob'])->id,
+        ]);
+        Setting::put(Setting::TimingFeedToken, 'secret-token');
+
+        $this->get(route('feeds.timing-lineups', ['token' => 'secret-token']))
+            ->assertOk()
+            ->assertExactJson([
+                'races' => [
+                    [
+                        'key' => 'race-'.$heat->id,
+                        'name' => 'Heat 1',
+                        'type' => $heat->raceType->name,
+                        'laps' => 8,
+                        'files' => [
+                            ['name' => 'Heat 1.csv', 'contents' => "111,1,First,Ann,,\r\n"],
+                            ['name' => 'Heat 1.dat', 'contents' => "Laps,8\r\nLength,0.100\r\nDuration,0\r\nBreakout,0.000\r\n"],
+                        ],
+                    ],
+                    [
+                        'key' => 'race-'.$feature->id,
+                        'name' => 'A-Main',
+                        'type' => $feature->raceType->name,
+                        'laps' => 30,
+                        'files' => [
+                            ['name' => 'A-Main.csv', 'contents' => "222,2,Second,Bob,,\r\n"],
+                            ['name' => 'A-Main.dat', 'contents' => "Laps,30\r\nLength,0.100\r\nDuration,0\r\nBreakout,0.000\r\n"],
+                        ],
+                    ],
+                ],
+            ]);
+    }
+
+    public function test_lineup_json_omits_pending_and_complete_races(): void
+    {
+        Race::factory()->create(['name' => 'Heat 1', 'laps' => 8]);
+        $ready = Race::factory()->lineups()->create(['name' => 'Heat 2', 'laps' => 8]);
+        Race::factory()->complete()->create(['name' => 'A-Main', 'laps' => 30]);
+        Setting::put(Setting::TimingFeedToken, 'secret-token');
+
+        $this->getJson(route('feeds.timing-lineups', ['token' => 'secret-token']))
+            ->assertOk()
+            ->assertJsonCount(1, 'races')
+            ->assertJsonPath('races.0.key', 'race-'.$ready->id)
+            ->assertJsonPath('races.0.name', 'Heat 2');
+    }
+
+    public function test_lineup_json_omits_a_combined_type_unless_every_group_is_lineups(): void
+    {
+        $type = RaceType::factory()->create(['name' => 'Hotlaps', 'combines_groups' => true]);
+        Race::factory()->lineups()->for($type)->create(['name' => 'Hotlaps 1', 'sort_order' => 1, 'laps' => 3]);
+        Race::factory()->for($type)->create(['name' => 'Hotlaps 2', 'sort_order' => 2, 'laps' => 3]);
+        Setting::put(Setting::TimingFeedToken, 'secret-token');
+
+        $this->getJson(route('feeds.timing-lineups', ['token' => 'secret-token']))
+            ->assertOk()
+            ->assertExactJson(['races' => []]);
+    }
+
+    public function test_lineup_json_uses_the_type_name_for_combined_groups(): void
+    {
+        $type = RaceType::factory()->create(['name' => 'Hotlaps', 'combines_groups' => true]);
+        $first = Race::factory()->lineups()->for($type)->create(['name' => 'Hotlaps 1', 'sort_order' => 1, 'laps' => 3]);
+        Race::factory()->lineups()->for($type)->create(['name' => 'Hotlaps 2', 'sort_order' => 2, 'laps' => 3]);
+        $first->syncLineup([
+            Competitor::factory()->create(['transponder' => '111', 'car_number' => '1', 'last_name' => 'First', 'first_name' => 'Ann'])->id,
+        ]);
+        Setting::put(Setting::TimingFeedToken, 'secret-token');
+
+        $this->get(route('feeds.timing-lineups', ['token' => 'secret-token']))
+            ->assertOk()
+            ->assertExactJson([
+                'races' => [
+                    [
+                        'key' => 'type-'.$type->id,
+                        'name' => 'Hotlaps',
+                        'type' => 'Hotlaps',
+                        'laps' => 3,
+                        'files' => [
+                            ['name' => 'Hotlaps.csv', 'contents' => "111,1,First,Ann,,\r\n"],
+                            ['name' => 'Hotlaps.dat', 'contents' => "Laps,3\r\nLength,0.100\r\nDuration,0\r\nBreakout,0.000\r\n"],
+                        ],
+                    ],
+                ],
+            ]);
+    }
+
     /**
      * @return array<string, string>
      */

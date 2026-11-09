@@ -36,6 +36,7 @@ class UserPermissionsTest extends TestCase
         $this->get(route('vmix'))->assertOk();
         $this->get(route('vmix-data'))->assertOk();
         $this->get(route('timing'))->assertForbidden();
+        $this->get(route('exports.timing-puller'))->assertForbidden();
         $this->get(route('settings'))->assertForbidden();
         $this->get(route('users'))->assertForbidden();
     }

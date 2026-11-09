@@ -76,6 +76,22 @@ new #[Title('Settings')] class extends Component
     }
 
     /**
+     * Copyable Timing File Feed URL the Electron puller GETs. Token is created on first visit.
+     */
+    #[Computed]
+    public function timingFeedUrl(): string
+    {
+        return route('feeds.timing-lineups', ['token' => Setting::timingFeedToken()]);
+    }
+
+    public function regenerateTimingFeedToken(): void
+    {
+        Setting::replaceTimingFeedToken();
+        unset($this->timingFeedUrl);
+        $this->dispatch('notify', message: 'Generated a new Timing File Feed URL. Paste it into the puller.');
+    }
+
+    /**
      * @return array{left: string, right: string}
      */
     #[Computed]
@@ -173,7 +189,7 @@ new #[Title('Settings')] class extends Component
     <section class="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
         <div class="border-b border-slate-100 px-4 py-3">
             <h2 class="font-black uppercase">Timing</h2>
-            <p class="text-sm text-slate-500">Track length in miles goes on the <code>Length</code> line of every timing .dat file.</p>
+            <p class="text-sm text-slate-500">Track length in miles goes on the <code>Length</code> line of every timing .dat file. Paste the Timing File Feed URL into the puller; only races set to Lineups are included.</p>
         </div>
         <form wire:submit="saveTrackLength" class="flex flex-wrap items-end gap-3 p-4">
             <label class="block">
@@ -183,6 +199,23 @@ new #[Title('Settings')] class extends Component
             </label>
             <button type="submit" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-700">Save</button>
         </form>
+        <div class="space-y-2 border-t border-slate-100 p-4">
+            <span class="text-xs font-semibold text-slate-500">Timing File Feed</span>
+            <div class="flex flex-wrap items-center gap-2" x-data>
+                <code x-ref="timingFeedUrl" class="min-w-0 flex-1 truncate rounded bg-slate-100 px-2 py-1.5 text-xs select-all">{{ $this->timingFeedUrl }}</code>
+                <button
+                    type="button"
+                    x-on:click="copyText($refs.timingFeedUrl.textContent.trim(), 'Timing File Feed URL')"
+                    class="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700"
+                >Copy URL</button>
+                <button
+                    type="button"
+                    wire:click="regenerateTimingFeedToken"
+                    wire:confirm="The puller will need the new Timing File Feed URL. Generate a new token?"
+                    class="rounded-md px-3 py-1.5 text-xs font-semibold ring-1 ring-slate-300 hover:bg-slate-50"
+                >New token</button>
+            </div>
+        </div>
     </section>
 
     <section class="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-slate-200">

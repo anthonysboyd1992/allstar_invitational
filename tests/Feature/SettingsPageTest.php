@@ -19,7 +19,7 @@ class SettingsPageTest extends TestCase
     {
         $this->actingAs(User::factory()->create());
 
-        $this->get(route('settings'))
+        $response = $this->get(route('settings'))
             ->assertOk()
             ->assertSee('Letterhead logos')
             ->assertSee('Left (primary)')
@@ -28,7 +28,12 @@ class SettingsPageTest extends TestCase
             ->assertSee('Venue name')
             ->assertSee('Venue location')
             ->assertSee('Timing')
-            ->assertSee('Track length');
+            ->assertSee('Track length')
+            ->assertSee('Timing File Feed');
+
+        $token = Setting::get(Setting::TimingFeedToken);
+        $this->assertNotNull($token);
+        $response->assertSee(route('feeds.timing-lineups', ['token' => $token]), false);
     }
 
     public function test_print_heading_cannot_exceed_255_characters(): void
@@ -68,6 +73,25 @@ class SettingsPageTest extends TestCase
 
         $this->assertNull(Setting::get(Setting::TrackLength));
         $this->assertSame('0.100', Setting::trackLength());
+    }
+
+    public function test_a_new_timing_token_changes_the_timing_file_feed_url(): void
+    {
+        $this->actingAs(User::factory()->create());
+
+        $page = Livewire::test('pages::settings');
+        $firstToken = Setting::get(Setting::TimingFeedToken);
+
+        $this->assertNotNull($firstToken);
+        $page->assertSee(route('feeds.timing-lineups', ['token' => $firstToken]));
+
+        $page->call('regenerateTimingFeedToken')
+            ->assertHasNoErrors();
+
+        $secondToken = Setting::get(Setting::TimingFeedToken);
+        $this->assertNotSame($firstToken, $secondToken);
+        $page->assertSee(route('feeds.timing-lineups', ['token' => $secondToken]));
+        $page->assertDontSee(route('feeds.timing-lineups', ['token' => $firstToken]));
     }
 
     public function test_print_heading_date_and_venue_appear_on_every_sheet(): void
