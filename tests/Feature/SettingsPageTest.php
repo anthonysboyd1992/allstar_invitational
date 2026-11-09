@@ -26,7 +26,9 @@ class SettingsPageTest extends TestCase
             ->assertSee('Right')
             ->assertSee('Print heading')
             ->assertSee('Venue name')
-            ->assertSee('Venue location');
+            ->assertSee('Venue location')
+            ->assertSee('Timing')
+            ->assertSee('Track length');
     }
 
     public function test_print_heading_cannot_exceed_255_characters(): void
@@ -39,6 +41,33 @@ class SettingsPageTest extends TestCase
             ->assertHasErrors(['printHeading']);
 
         $this->assertNull(Setting::get(Setting::PrintHeading));
+    }
+
+    public function test_track_length_saves_for_timing_dat_files(): void
+    {
+        $this->actingAs(User::factory()->create());
+
+        Livewire::test('pages::settings')
+            ->set('trackLength', '0.25')
+            ->call('saveTrackLength')
+            ->assertHasNoErrors()
+            ->assertSet('trackLength', '0.250');
+
+        $this->assertSame('0.250', Setting::get(Setting::TrackLength));
+        $this->assertSame('0.250', Setting::trackLength());
+    }
+
+    public function test_track_length_must_be_a_positive_number(): void
+    {
+        $this->actingAs(User::factory()->create());
+
+        Livewire::test('pages::settings')
+            ->set('trackLength', '0')
+            ->call('saveTrackLength')
+            ->assertHasErrors(['trackLength']);
+
+        $this->assertNull(Setting::get(Setting::TrackLength));
+        $this->assertSame('0.100', Setting::trackLength());
     }
 
     public function test_print_heading_date_and_venue_appear_on_every_sheet(): void

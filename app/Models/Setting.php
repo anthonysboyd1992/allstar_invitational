@@ -45,6 +45,13 @@ class Setting extends Model
 
     public const PrintVenueName = 'print_venue_name';
 
+    /**
+     * Track length in miles for the timing .dat Length line.
+     */
+    public const TrackLength = 'track_length';
+
+    public const DefaultTrackLength = '0.100';
+
     public const LetterheadDirectory = 'letterhead';
 
     /**
@@ -86,6 +93,21 @@ class Setting extends Model
         $count = (int) static::get(self::DriversPerDataset, (string) self::DefaultDriversPerDataset);
 
         return $count >= 1 && $count <= self::MaxDriversPerDataset ? $count : self::DefaultDriversPerDataset;
+    }
+
+    /**
+     * Track length for timing .dat files, always three decimal places, e.g. "0.100".
+     */
+    public static function trackLength(): string
+    {
+        $value = static::get(self::TrackLength, self::DefaultTrackLength);
+        $length = is_numeric($value) ? (float) $value : (float) self::DefaultTrackLength;
+
+        if ($length <= 0) {
+            $length = (float) self::DefaultTrackLength;
+        }
+
+        return number_format($length, 3, '.', '');
     }
 
     public static function activeDriver(): ?Competitor

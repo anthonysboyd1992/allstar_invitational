@@ -30,8 +30,10 @@ class TimingPageTest extends TestCase
             ->assertOk()
             ->assertSee(route('exports.transponders', $heat1), false)
             ->assertSee(route('exports.laps', $heat1), false)
+            ->assertSee(route('exports.race-zip', $heat1), false)
             ->assertSee(route('exports.transponders', $heat2), false)
             ->assertSee(route('exports.laps', $heat2), false)
+            ->assertSee(route('exports.race-zip', $heat2), false)
             ->assertSee('No laps');
     }
 
@@ -74,6 +76,7 @@ class TimingPageTest extends TestCase
             ->assertOk()
             ->assertSee(route('exports.type-transponders', $type), false)
             ->assertSee(route('exports.type-laps', $type), false)
+            ->assertSee(route('exports.type-zip', $type), false)
             ->assertDontSee(route('exports.transponders', $first), false)
             ->assertDontSee(route('exports.laps', $first), false)
             ->assertDontSee(route('exports.transponders', $second), false)

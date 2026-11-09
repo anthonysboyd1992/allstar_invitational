@@ -85,45 +85,8 @@ new #[Title('Timing')] class extends Component
             ->pluck('id')
             ->values()),
         allIds: @js($this->allRaces->pluck('id')->values()),
-        downloading: false,
-        urlTemplates: {
-            csv: @js(route('exports.transponders', '__RACE__')),
-            dat: @js(route('exports.laps', '__RACE__')),
-            typeCsv: @js(route('exports.type-transponders', '__TYPE__')),
-            typeDat: @js(route('exports.type-laps', '__TYPE__')),
-        },
-        combinedTypeIds: @js($this->raceTypes->where('combines_groups', true)->pluck('id')->values()),
-        raceToType: @js($this->allRaces->mapWithKeys(fn ($race) => [$race->id => $race->race_type_id])),
-        urls(id, kinds = ['csv', 'dat']) {
-            return kinds.map(kind => this.urlTemplates[kind].replace('__RACE__', id));
-        },
-        typeUrls(typeId) {
-            return [
-                this.urlTemplates.typeCsv.replace('__TYPE__', typeId),
-                this.urlTemplates.typeDat.replace('__TYPE__', typeId),
-            ];
-        },
-        isCombined(id) {
-            return this.combinedTypeIds.some(typeId => Number(typeId) === Number(this.raceToType[id]));
-        },
-        downloadUrls(ids) {
-            const urls = [];
-            const seenTypes = new Set();
-
-            for (const id of ids) {
-                const typeId = this.raceToType[id];
-
-                if (this.isCombined(id)) {
-                    if (! seenTypes.has(Number(typeId))) {
-                        seenTypes.add(Number(typeId));
-                        urls.push(...this.typeUrls(typeId));
-                    }
-                } else {
-                    urls.push(...this.urls(id));
-                }
-            }
-
-            return urls;
+        zipUrl(ids) {
+            return @js(route('exports.timing-zip')).concat('?races=', ids.join(','));
         },
         toggle(ids) {
             const allSelected = ids.every(id => this.selected.includes(id));
@@ -131,31 +94,25 @@ new #[Title('Timing')] class extends Component
                 ? this.selected.filter(id => ! ids.includes(id))
                 : [...new Set([...this.selected, ...ids])];
         },
-        async download(ids) {
-            this.downloading = true;
-            await window.downloadFiles(this.downloadUrls(ids));
-            this.downloading = false;
-        },
     }"
 >
     <div class="flex flex-wrap items-center gap-3 rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
         <div class="min-w-0 flex-1">
             <h1 class="text-lg font-black uppercase">Timing files</h1>
             <p class="text-sm text-slate-500">
-                Each race has a transponder <b>.csv</b> in starting order and a <b>.dat</b> with <code>Laps=</code>, both named after the race.
-                Types marked One file only show that combined file.
-                If your browser asks, allow multiple downloads.
+                Each race has a transponder <b>.csv</b> in starting order (no header row) and a <b>.dat</b> with Laps, Length, Duration, and Breakout.
+                <b>.zip</b> puts both files together. Types marked One file only show that combined file.
             </p>
         </div>
         <button type="button" x-on:click="toggle(allIds)" class="rounded-md px-3 py-2 text-sm font-semibold ring-1 ring-slate-300 hover:bg-slate-50"
             x-text="allIds.every(id => selected.includes(id)) ? 'Select none' : 'Select all'"></button>
-        <button
-            type="button"
-            x-on:click="download(selected)"
-            x-bind:disabled="downloading || selected.length === 0"
-            class="rounded-md bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-700 disabled:opacity-50"
-            x-text="downloading ? 'Downloading…' : `Download ${selected.length} ${selected.length === 1 ? 'race' : 'races'} (${downloadUrls(selected).length} files)`"
-        ></button>
+        <a
+            x-bind:href="selected.length ? zipUrl(selected) : undefined"
+            x-bind:aria-disabled="selected.length === 0"
+            x-bind:class="selected.length === 0 ? 'pointer-events-none opacity-50' : ''"
+            class="rounded-md bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-700"
+            x-text="`Download ${selected.length} ${selected.length === 1 ? 'race' : 'races'}`"
+        ></a>
     </div>
 
     @forelse ($this->raceTypes as $raceType)
@@ -194,13 +151,13 @@ new #[Title('Timing')] class extends Component
                             <span class="text-red-600">{{ $typeMissing }} missing transponder{{ $typeMissing === 1 ? '' : 's' }}</span>
                         @endif
                         @if (! $raceType->sessionLaps())
-                            <span class="text-red-600">No laps — .dat will say Laps=0</span>
+                            <span class="text-red-600">No laps — .dat will say Laps,0</span>
                         @endif
                     </span>
                     <div class="flex gap-1 text-xs font-bold">
                         <a href="{{ route('exports.type-transponders', $raceType) }}" download class="rounded px-2 py-1 ring-1 ring-slate-300 hover:bg-slate-50">.csv</a>
                         <a href="{{ route('exports.type-laps', $raceType) }}" download class="rounded px-2 py-1 ring-1 ring-slate-300 hover:bg-slate-50">.dat</a>
-                        <button type="button" x-on:click="download([{{ $fileRace->id }}])" class="rounded bg-slate-900 px-2 py-1 text-white hover:bg-slate-700">Both</button>
+                        <a href="{{ route('exports.type-zip', $raceType) }}" download class="rounded bg-slate-900 px-2 py-1 text-white hover:bg-slate-700">.zip</a>
                     </div>
                 </div>
                 <div x-show="open" x-cloak class="border-t border-slate-100 bg-slate-50 px-4 py-2">
@@ -282,13 +239,13 @@ new #[Title('Timing')] class extends Component
                                         <span class="text-red-600" title="Drivers without a transponder are left out of the CSV">{{ $missingTransponders }} missing transponder{{ $missingTransponders === 1 ? '' : 's' }}</span>
                                     @endif
                                     @if (! $race->laps)
-                                        <span class="text-red-600">No laps — .dat will say Laps=0</span>
+                                        <span class="text-red-600">No laps — .dat will say Laps,0</span>
                                     @endif
                                 </span>
                                 <div class="flex gap-1 text-xs font-bold">
                                     <a href="{{ route('exports.transponders', $race) }}" download class="rounded px-2 py-1 ring-1 ring-slate-300 hover:bg-slate-50">.csv</a>
                                     <a href="{{ route('exports.laps', $race) }}" download class="rounded px-2 py-1 ring-1 ring-slate-300 hover:bg-slate-50">.dat</a>
-                                    <button type="button" x-on:click="download([{{ $race->id }}])" class="rounded bg-slate-900 px-2 py-1 text-white hover:bg-slate-700">Both</button>
+                                    <a href="{{ route('exports.race-zip', $race) }}" download class="rounded bg-slate-900 px-2 py-1 text-white hover:bg-slate-700">.zip</a>
                                 </div>
                             </div>
                             <div x-show="open" x-cloak class="bg-slate-50 px-4 py-2">

@@ -20,7 +20,9 @@ class UserPermissionsTest extends TestCase
 
         $this->get(route('timing'))->assertOk();
         $this->get(route('exports.transponders', $race))->assertOk();
+        $this->get(route('exports.race-zip', $race))->assertOk();
         $this->get(route('exports.type-transponders', $race->raceType))->assertOk();
+        $this->get(route('exports.type-zip', $race->raceType))->assertOk();
 
         foreach (['competitors', 'cars', 'lineups', 'results', 'vmix', 'vmix-data', 'settings', 'users'] as $routeName) {
             $this->get(route($routeName))->assertForbidden();

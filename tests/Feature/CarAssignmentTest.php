@@ -305,8 +305,7 @@ class CarAssignmentTest extends TestCase
 
         $this->assertSame('7', $this->assignedCars($race)[$driver->id]);
         $this->assertSame(
-            "\"Trns ID\",#,\"Last Name\",\"First Name\",Misc,\"Backup Trns ID\"\r\n"
-            ."108571,35,Shultz,Jason,,\r\n",
+            "108571,35,Shultz,Jason,,\r\n",
             $this->get(route('exports.transponders', $race))->streamedContent(),
         );
     }

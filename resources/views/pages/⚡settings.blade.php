@@ -24,6 +24,8 @@ new #[Title('Settings')] class extends Component
 
     public string $printVenue = '';
 
+    public string $trackLength = Setting::DefaultTrackLength;
+
     public function boot(): void
     {
         Gate::authorize('access-settings');
@@ -35,6 +37,7 @@ new #[Title('Settings')] class extends Component
         $this->printDate = (string) Setting::get(Setting::PrintDate, '');
         $this->printVenueName = (string) Setting::get(Setting::PrintVenueName, '');
         $this->printVenue = (string) Setting::get(Setting::PrintVenue, '');
+        $this->trackLength = Setting::trackLength();
     }
 
     public function savePrintHeader(): void
@@ -57,6 +60,19 @@ new #[Title('Settings')] class extends Component
         Setting::put(Setting::PrintVenue, trim((string) ($validated['printVenue'] ?? '')) ?: null);
 
         $this->dispatch('notify', message: 'Saved print heading.');
+    }
+
+    public function saveTrackLength(): void
+    {
+        $validated = $this->validate([
+            'trackLength' => ['required', 'numeric', 'min:0.001', 'max:10'],
+        ], attributes: [
+            'trackLength' => 'track length',
+        ]);
+
+        Setting::put(Setting::TrackLength, number_format((float) $validated['trackLength'], 3, '.', ''));
+        $this->trackLength = Setting::trackLength();
+        $this->dispatch('notify', message: 'Saved track length.');
     }
 
     /**
@@ -151,6 +167,21 @@ new #[Title('Settings')] class extends Component
             <div class="sm:col-span-2 flex justify-end">
                 <button type="submit" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-700">Save</button>
             </div>
+        </form>
+    </section>
+
+    <section class="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
+        <div class="border-b border-slate-100 px-4 py-3">
+            <h2 class="font-black uppercase">Timing</h2>
+            <p class="text-sm text-slate-500">Track length in miles goes on the <code>Length</code> line of every timing .dat file.</p>
+        </div>
+        <form wire:submit="saveTrackLength" class="flex flex-wrap items-end gap-3 p-4">
+            <label class="block">
+                <span class="text-xs font-semibold text-slate-500">Track length</span>
+                <input wire:model="trackLength" type="text" inputmode="decimal" class="mt-0.5 w-32 rounded-md border border-slate-300 px-2 py-1.5 font-mono text-sm focus:border-amber-500 focus:outline-none">
+                @error('trackLength') <span class="block text-xs text-red-600">{{ $message }}</span> @enderror
+            </label>
+            <button type="submit" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-700">Save</button>
         </form>
     </section>
 
