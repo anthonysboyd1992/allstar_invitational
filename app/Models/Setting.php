@@ -138,6 +138,13 @@ class Setting extends Model
         return $token;
     }
 
+    public static function timingFeedTokenMatches(string $provided): bool
+    {
+        $expected = (string) static::get(self::TimingFeedToken, '');
+
+        return filled($expected) && filled($provided) && hash_equals($expected, $provided);
+    }
+
     public static function activeDriver(): ?Competitor
     {
         $id = static::get(self::ActiveDriver);

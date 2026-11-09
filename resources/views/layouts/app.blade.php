@@ -17,7 +17,7 @@
                     Allstar <span class="text-amber-400">Invitational</span>
                 </a>
 
-                <nav class="flex gap-1 text-sm font-semibold">
+                <nav class="flex flex-wrap gap-1 text-sm font-semibold">
                     @foreach (\App\Models\User::Areas as $routeName => $label)
                         @continue(! auth()->user()?->canAccessArea($routeName))
                         <a
@@ -29,6 +29,17 @@
                                 'text-slate-300 hover:bg-slate-800 hover:text-white' => ! request()->routeIs($routeName),
                             ])
                         >{{ $label }}</a>
+                        @if ($routeName === 'timing' || ($routeName === 'results' && ! auth()->user()?->canAccessArea('timing')))
+                            <a
+                                href="{{ route('live-timing') }}"
+                                wire:navigate
+                                @class([
+                                    'rounded-md px-3 py-1.5 transition',
+                                    'bg-amber-400 text-slate-900' => request()->routeIs('live-timing'),
+                                    'text-slate-300 hover:bg-slate-800 hover:text-white' => ! request()->routeIs('live-timing'),
+                                ])
+                            >Live Timing</a>
+                        @endif
                     @endforeach
                 </nav>
 

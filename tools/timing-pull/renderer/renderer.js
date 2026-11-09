@@ -7,6 +7,17 @@ const selectNone = document.getElementById('selectNone');
 const pull = document.getElementById('pull');
 const races = document.getElementById('races');
 const status = document.getElementById('status');
+const rmonitorHost = document.getElementById('rmonitorHost');
+const rmonitorPort = document.getElementById('rmonitorPort');
+const listen = document.getElementById('listen');
+const disconnect = document.getElementById('disconnect');
+const showOutput = document.getElementById('showOutput');
+const rmonitorOutputWrap = document.getElementById('rmonitorOutputWrap');
+const rmonitorOutput = document.getElementById('rmonitorOutput');
+const clearOutput = document.getElementById('clearOutput');
+const sessions = document.getElementById('sessions');
+const rmonitorStatus = document.getElementById('rmonitorStatus');
+const pushStatus = document.getElementById('pushStatus');
 
 let raceList = [];
 
@@ -112,12 +123,76 @@ async function persist() {
     await window.timingPull.saveConfig({
         feedUrl: feedUrl.value.trim(),
         assignFolder: assignFolder.value.trim(),
+        rmonitorHost: rmonitorHost.value.trim() || '127.0.0.1',
+        rmonitorPort: rmonitorPort.value.trim() || '50000',
     });
 }
 
 function applyConfig(config) {
     feedUrl.value = config.feedUrl ?? '';
     assignFolder.value = config.assignFolder ?? '';
+    rmonitorHost.value = config.rmonitorHost ?? '127.0.0.1';
+    rmonitorPort.value = config.rmonitorPort ?? '50000';
+}
+
+function setRmonitorStatus(message, kind = '') {
+    rmonitorStatus.textContent = message;
+    rmonitorStatus.className = kind;
+}
+
+function renderSessions(list) {
+    sessions.replaceChildren();
+
+    if (! list.length) {
+        const empty = document.createElement('li');
+        empty.className = 'empty';
+        empty.textContent = 'No sessions yet. After Race Manager starts a run, it is sent to Live Timing.';
+        sessions.append(empty);
+        return;
+    }
+
+    for (const session of list) {
+        const item = document.createElement('li');
+        item.className = 'race';
+        item.style.paddingLeft = '8px';
+        item.style.cursor = 'default';
+
+        const name = document.createElement('span');
+        name.textContent = session.live ? `${session.name} (live)` : session.name;
+
+        const meta = document.createElement('span');
+        meta.className = 'laps';
+        const flag = session.flag ? ` · ${session.flag}` : '';
+        meta.textContent = `${session.standings.length} car${session.standings.length === 1 ? '' : 's'}${flag}`;
+
+        item.append(name, meta);
+        sessions.append(item);
+    }
+}
+
+function renderOutput(lines) {
+    rmonitorOutputWrap.hidden = ! showOutput.checked;
+
+    if (! showOutput.checked) {
+        return;
+    }
+
+    const atBottom = rmonitorOutput.scrollHeight - rmonitorOutput.scrollTop - rmonitorOutput.clientHeight < 24;
+    rmonitorOutput.textContent = lines.length ? lines.join('\n') : 'Waiting for Race Manager…';
+
+    if (atBottom) {
+        rmonitorOutput.scrollTop = rmonitorOutput.scrollHeight;
+    }
+}
+
+function applyRmonitorSnapshot(snapshot) {
+    listen.disabled = snapshot.connected;
+    disconnect.disabled = ! snapshot.connected;
+    setRmonitorStatus(snapshot.status, snapshot.connected ? 'ok' : '');
+    pushStatus.textContent = snapshot.lastPush?.message ?? '';
+    pushStatus.className = snapshot.lastPush?.kind ?? '';
+    renderSessions(snapshot.sessions ?? []);
+    renderOutput(snapshot.output ?? []);
 }
 
 async function loadRaces() {
@@ -135,6 +210,43 @@ async function loadRaces() {
 
 feedUrl.addEventListener('change', persist);
 assignFolder.addEventListener('change', persist);
+rmonitorHost.addEventListener('change', persist);
+rmonitorPort.addEventListener('change', persist);
+
+listen.addEventListener('click', async () => {
+    await persist();
+    setRmonitorStatus('Working…');
+    listen.disabled = true;
+
+    try {
+        applyRmonitorSnapshot(await window.timingPull.rmonitorConnect());
+    } catch (error) {
+        listen.disabled = false;
+        setRmonitorStatus(error?.message ?? String(error), 'error');
+    }
+});
+
+disconnect.addEventListener('click', async () => {
+    setRmonitorStatus('Working…');
+    disconnect.disabled = true;
+
+    try {
+        applyRmonitorSnapshot(await window.timingPull.rmonitorDisconnect());
+    } catch (error) {
+        disconnect.disabled = false;
+        setRmonitorStatus(error?.message ?? String(error), 'error');
+    }
+});
+
+showOutput.addEventListener('change', async () => {
+    renderOutput((await window.timingPull.rmonitorStatus()).output ?? []);
+});
+
+clearOutput.addEventListener('click', async () => {
+    applyRmonitorSnapshot(await window.timingPull.rmonitorClearOutput());
+});
+
+window.timingPull.onRmonitorUpdate(applyRmonitorSnapshot);
 
 chooseFolder.addEventListener('click', async () => {
     const config = await window.timingPull.chooseAssignFolder();
@@ -194,6 +306,7 @@ pull.addEventListener('click', async () => {
 
 window.timingPull.getConfig().then(async (config) => {
     applyConfig(config);
+    applyRmonitorSnapshot(await window.timingPull.rmonitorStatus());
 
     if (config.feedUrl) {
         try {

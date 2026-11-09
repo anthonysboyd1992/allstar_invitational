@@ -1,4 +1,57 @@
 /**
+ * Expand a live timing board over the app. Native fullscreen targets the document,
+ * not the Livewire board, so polling cannot replace the fullscreen element.
+ */
+window.timingFullscreen = () => ({
+    full: false,
+    init() {
+        this.full = document.documentElement.classList.contains('timing-fullscreen');
+    },
+    toggle() {
+        if (this.full) {
+            this.exit();
+
+            return;
+        }
+
+        this.enter();
+    },
+    enter() {
+        this.full = true;
+        document.documentElement.classList.add('timing-fullscreen');
+
+        const root = document.documentElement;
+        const request = root.requestFullscreen ?? root.webkitRequestFullscreen;
+
+        if (typeof request === 'function') {
+            Promise.resolve(request.call(root)).catch(() => {});
+        }
+    },
+    exit() {
+        this.full = false;
+        document.documentElement.classList.remove('timing-fullscreen');
+
+        const current = document.fullscreenElement ?? document.webkitFullscreenElement;
+
+        if (current) {
+            (document.exitFullscreen ?? document.webkitExitFullscreen).call(document);
+        }
+    },
+    sync() {
+        const current = document.fullscreenElement ?? document.webkitFullscreenElement;
+
+        if (! current && this.full) {
+            this.full = false;
+            document.documentElement.classList.remove('timing-fullscreen');
+        }
+    },
+});
+
+document.addEventListener('livewire:navigated', () => {
+    document.documentElement.classList.remove('timing-fullscreen');
+});
+
+/**
  * Copy text and confirm with a toast. navigator.clipboard only exists on HTTPS or localhost,
  * so plain-HTTP servers fall back to a hidden textarea and execCommand.
  */

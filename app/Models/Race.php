@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
-#[Fillable(['race_type_id', 'name', 'lineup_name', 'laps', 'transfers', 'sponsor', 'starting_positions', 'sort_order', 'timing_status'])]
+#[Fillable(['race_type_id', 'name', 'lineup_name', 'laps', 'transfers', 'sponsor', 'starting_positions', 'sort_order', 'timing_status', 'inverted_at', 'invert_count', 'live_feed_id'])]
 class Race extends Model
 {
     /** @use HasFactory<RaceFactory> */
@@ -32,6 +32,21 @@ class Race extends Model
     public function entries(): HasMany
     {
         return $this->hasMany(RaceEntry::class)->orderBy('start_position');
+    }
+
+    /**
+     * Live timing session attached when this race was inverted.
+     *
+     * @return BelongsTo<TimingFeedResult, $this>
+     */
+    public function liveFeed(): BelongsTo
+    {
+        return $this->belongsTo(TimingFeedResult::class, 'live_feed_id');
+    }
+
+    public function isInverted(): bool
+    {
+        return $this->inverted_at !== null;
     }
 
     /**
@@ -568,6 +583,129 @@ class Race extends Model
     }
 
     /**
+     * Freeze live running order and write inverted restart spots. Original starts stay put.
+     *
+     * invert_count 0 means the full field on the live board.
+     *
+     * @return array{inverted: int, unmatched: int}
+     */
+    public function invertFrom(TimingFeedResult $feed, int $count): array
+    {
+        $plan = $this->restartOrderFrom($feed, $count);
+
+        if ($plan['restart']->isEmpty()) {
+            return ['inverted' => 0, 'unmatched' => $plan['unmatched']];
+        }
+
+        DB::transaction(function () use ($feed, $count, $plan): void {
+            static::query()->where('live_feed_id', $feed->id)->whereKeyNot($this->id)->update(['live_feed_id' => null]);
+
+            foreach ($plan['break'] as $index => $entry) {
+                $entry->update(['break_position' => $index + 1]);
+            }
+
+            foreach ($plan['restart'] as $index => $entry) {
+                $entry->update(['invert_start_position' => $index + 1]);
+            }
+
+            $this->update([
+                'inverted_at' => now(),
+                'invert_count' => $count,
+                'live_feed_id' => $feed->id,
+            ]);
+        });
+
+        $this->unsetRelation('entries');
+
+        return [
+            'inverted' => $plan['restart']->count(),
+            'unmatched' => $plan['unmatched'],
+        ];
+    }
+
+    public function undoInvert(): void
+    {
+        DB::transaction(function (): void {
+            $this->entries()->update([
+                'break_position' => null,
+                'invert_start_position' => null,
+            ]);
+
+            $this->update([
+                'inverted_at' => null,
+                'invert_count' => null,
+                'live_feed_id' => null,
+            ]);
+        });
+
+        $this->unsetRelation('entries');
+    }
+
+    /**
+     * @return array{break: Collection<int, RaceEntry>, restart: Collection<int, RaceEntry>, unmatched: int}
+     */
+    public function restartOrderFrom(TimingFeedResult $feed, int $count): array
+    {
+        $this->loadMissing('entries.competitor');
+
+        $available = $this->entries->values();
+        $onTrack = new Collection;
+        $unmatched = 0;
+
+        foreach ($feed->orderedStandings() as $standing) {
+            $entry = $this->entryMatchingStanding($available, $standing);
+
+            if ($entry === null) {
+                $unmatched++;
+
+                continue;
+            }
+
+            $available = $available->reject(fn (RaceEntry $row): bool => $row->id === $entry->id)->values();
+            $onTrack->push($entry);
+        }
+
+        $pits = $available->sortBy('start_position')->values();
+        $break = $onTrack->concat($pits)->values();
+        $depth = $count === 0 ? $onTrack->count() : min(max($count, 0), $break->count());
+        $restart = $break->take($depth)->reverse()->values()->concat($break->slice($depth)->values())->values();
+
+        return [
+            'break' => $break,
+            'restart' => $restart,
+            'unmatched' => $unmatched,
+        ];
+    }
+
+    /**
+     * @param  Collection<int, RaceEntry>  $entries
+     * @param  array<string, mixed>  $standing
+     */
+    public function entryMatchingStanding(Collection $entries, array $standing): ?RaceEntry
+    {
+        $transponder = trim((string) ($standing['transponder'] ?? ''));
+        $number = trim((string) ($standing['number'] ?? ''));
+
+        if ($transponder !== '') {
+            $match = $entries->first(
+                fn (RaceEntry $entry): bool => strcasecmp((string) $entry->competitor?->transponder, $transponder) === 0,
+            );
+
+            if ($match !== null) {
+                return $match;
+            }
+        }
+
+        if ($number !== '') {
+            return $entries->first(
+                fn (RaceEntry $entry): bool => strcasecmp((string) $entry->competitor?->car_number, $number) === 0,
+            );
+        }
+
+        return null;
+    }
+
+    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>
@@ -579,6 +717,8 @@ class Race extends Model
             'starting_positions' => 'integer',
             'sort_order' => 'integer',
             'timing_status' => TimingStatus::class,
+            'inverted_at' => 'datetime',
+            'invert_count' => 'integer',
         ];
     }
 }

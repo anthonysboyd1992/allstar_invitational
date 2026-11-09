@@ -84,10 +84,19 @@ new #[Title('Settings')] class extends Component
         return route('feeds.timing-lineups', ['token' => Setting::timingFeedToken()]);
     }
 
+    /**
+     * Path only, so the browser can prefix the host the user is actually on.
+     */
+    #[Computed]
+    public function timingFeedPath(): string
+    {
+        return route('feeds.timing-lineups', ['token' => Setting::timingFeedToken()], absolute: false);
+    }
+
     public function regenerateTimingFeedToken(): void
     {
         Setting::replaceTimingFeedToken();
-        unset($this->timingFeedUrl);
+        unset($this->timingFeedUrl, $this->timingFeedPath);
         $this->dispatch('notify', message: 'Generated a new Timing File Feed URL. Paste it into the puller.');
     }
 
@@ -189,7 +198,7 @@ new #[Title('Settings')] class extends Component
     <section class="overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
         <div class="border-b border-slate-100 px-4 py-3">
             <h2 class="font-black uppercase">Timing</h2>
-            <p class="text-sm text-slate-500">Track length in miles goes on the <code>Length</code> line of every timing .dat file. Paste the Timing File Feed URL into the puller; only races set to Lineups are included.</p>
+            <p class="text-sm text-slate-500">Track length in miles goes on the <code>Length</code> line of every timing .dat file and is used to show speed on Live Timing from each car’s last lap. Copy this URL into the puller; it already points at this site. Only races set to Lineups are included.</p>
         </div>
         <form wire:submit="saveTrackLength" class="flex flex-wrap items-end gap-3 p-4">
             <label class="block">
@@ -201,8 +210,8 @@ new #[Title('Settings')] class extends Component
         </form>
         <div class="space-y-2 border-t border-slate-100 p-4">
             <span class="text-xs font-semibold text-slate-500">Timing File Feed</span>
-            <div class="flex flex-wrap items-center gap-2" x-data>
-                <code x-ref="timingFeedUrl" class="min-w-0 flex-1 truncate rounded bg-slate-100 px-2 py-1.5 text-xs select-all">{{ $this->timingFeedUrl }}</code>
+            <div class="flex flex-wrap items-center gap-2" x-data="{ path: @js($this->timingFeedPath) }">
+                <code x-ref="timingFeedUrl" x-text="window.location.origin + path" class="min-w-0 flex-1 truncate rounded bg-slate-100 px-2 py-1.5 text-xs select-all">{{ $this->timingFeedUrl }}</code>
                 <button
                     type="button"
                     x-on:click="copyText($refs.timingFeedUrl.textContent.trim(), 'Timing File Feed URL')"

@@ -54,6 +54,20 @@ class RaceType extends Model
     }
 
     /**
+     * Last finishing position that transfers out of a race in this type.
+     */
+    public function transferLinePosition(): ?int
+    {
+        $this->loadMissing('transferRules');
+
+        $cutoffs = $this->transferRules
+            ->map(fn (RaceTypeTransferRule $rule): int => (int) ($rule->position_to ?? $rule->position_from))
+            ->filter(fn (int $position): bool => $position > 0);
+
+        return $cutoffs->isEmpty() ? null : $cutoffs->max();
+    }
+
+    /**
      * How finishers from this type fill later races.
      *
      * @return HasMany<RaceTypeTransferRule, $this>

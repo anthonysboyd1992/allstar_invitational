@@ -29,11 +29,14 @@ class SettingsPageTest extends TestCase
             ->assertSee('Venue location')
             ->assertSee('Timing')
             ->assertSee('Track length')
-            ->assertSee('Timing File Feed');
+            ->assertSee('Timing File Feed')
+            ->assertSee('already points at this site');
 
         $token = Setting::get(Setting::TimingFeedToken);
         $this->assertNotNull($token);
-        $response->assertSee(route('feeds.timing-lineups', ['token' => $token]), false);
+        $response->assertSee(route('feeds.timing-lineups', ['token' => $token]), false)
+            ->assertSee(route('feeds.timing-lineups', ['token' => $token], false), false)
+            ->assertSee('window.location.origin + path', false);
     }
 
     public function test_print_heading_cannot_exceed_255_characters(): void

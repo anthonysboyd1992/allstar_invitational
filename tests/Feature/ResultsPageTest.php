@@ -6,6 +6,8 @@ use App\Models\Competitor;
 use App\Models\Race;
 use App\Models\RaceType;
 use App\Models\RaceTypeTransferRule;
+use App\Models\Setting;
+use App\Models\TimingFeedResult;
 use App\Models\User;
 use App\TimingStatus;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -181,6 +183,222 @@ class ResultsPageTest extends TestCase
         $this->assertSame(0, $program['feature']->entries()->count());
         $this->assertSame(0, $program['bMain1']->entries()->count());
         $this->assertSame(0, $program['bMain2']->entries()->count());
+    }
+
+    public function test_results_page_shows_the_timing_feed_picker_before_any_snapshots_arrive(): void
+    {
+        $type = RaceType::factory()->create(['has_results' => true]);
+        $race = Race::factory()->for($type)->create(['name' => 'Heat 1']);
+        $race->syncLineup([Competitor::factory()->create()->id]);
+
+        $this->get(route('results'))
+            ->assertOk()
+            ->assertSee('Waiting for timing feed')
+            ->assertSee('Apply');
+    }
+
+    public function test_results_page_shows_the_live_timing_feed_session(): void
+    {
+        $type = RaceType::factory()->create(['has_results' => true]);
+        $race = Race::factory()->for($type)->create(['name' => 'Heat 1']);
+        $race->syncLineup([Competitor::factory()->create()->id]);
+        TimingFeedResult::factory()->live()->create(['name' => 'Heat 1 Live']);
+
+        $this->get(route('results'))
+            ->assertOk()
+            ->assertSee('Live timing')
+            ->assertSee('Heat 1 Live')
+            ->assertSee('Ann First')
+            ->assertSee('Full screen');
+    }
+
+    public function test_results_page_lists_timing_feed_snapshots(): void
+    {
+        $type = RaceType::factory()->create(['has_results' => true]);
+        $race = Race::factory()->for($type)->create(['name' => 'Heat 1']);
+        $race->syncLineup([Competitor::factory()->create()->id]);
+        TimingFeedResult::factory()->create(['name' => 'Orbits Heat 1']);
+
+        $this->get(route('results'))
+            ->assertOk()
+            ->assertSee('Timing feed')
+            ->assertSee('Apply')
+            ->assertSee('Orbits Heat 1');
+    }
+
+    public function test_results_page_omits_applied_timing_feed_sessions_from_the_picker(): void
+    {
+        $type = RaceType::factory()->create(['has_results' => true]);
+        $race = Race::factory()->for($type)->create(['name' => 'Heat 1']);
+        $race->syncLineup([Competitor::factory()->create()->id]);
+        TimingFeedResult::factory()->applied()->create(['name' => 'Orbits Heat 1']);
+        TimingFeedResult::factory()->create(['name' => 'Orbits Heat 2']);
+
+        $this->get(route('results'))
+            ->assertOk()
+            ->assertSee('Orbits Heat 2')
+            ->assertDontSee('Orbits Heat 1')
+            ->assertDontSee('Live timing');
+    }
+
+    public function test_results_page_omits_deleted_timing_feed_sessions_from_the_picker(): void
+    {
+        $type = RaceType::factory()->create(['has_results' => true]);
+        $race = Race::factory()->for($type)->create(['name' => 'Heat 1']);
+        $race->syncLineup([Competitor::factory()->create()->id]);
+        TimingFeedResult::factory()->ignored()->create(['name' => 'Practice Junk']);
+        TimingFeedResult::factory()->create(['name' => 'Orbits Heat 1']);
+
+        $this->get(route('results'))
+            ->assertOk()
+            ->assertSee('Orbits Heat 1')
+            ->assertDontSee('Practice Junk')
+            ->assertDontSee('Deleted sessions')
+            ->assertDontSee('Restore')
+            ->assertDontSee('Live timing');
+    }
+
+    public function test_results_page_deletes_a_session_from_the_timing_feed_picker(): void
+    {
+        $type = RaceType::factory()->create(['has_results' => true]);
+        $race = Race::factory()->for($type)->create(['name' => 'Heat 1']);
+        $race->syncLineup([Competitor::factory()->create()->id]);
+        $practice = TimingFeedResult::factory()->create(['name' => 'Practice Junk']);
+        TimingFeedResult::factory()->create(['name' => 'Orbits Heat 1']);
+
+        Livewire::test('pages::results')
+            ->assertSee('Practice Junk')
+            ->call('deleteSession', $practice->id)
+            ->assertDontSee('Practice Junk')
+            ->assertDontSee('Deleted sessions')
+            ->assertDontSee('Restore')
+            ->assertDispatched('notify', message: 'Deleted Practice Junk.');
+
+        $this->assertNotNull($practice->fresh()->ignored_at);
+        $this->get(route('results'))
+            ->assertOk()
+            ->assertSee('Orbits Heat 1')
+            ->assertDontSee('Practice Junk')
+            ->assertDontSee('>Practice Junk</option>', false);
+    }
+
+    public function test_results_live_board_shows_gap_and_diff_instead_of_elapsed_time(): void
+    {
+        Setting::put(Setting::TrackLength, '0.250');
+
+        $type = RaceType::factory()->create(['has_results' => true]);
+        $race = Race::factory()->for($type)->create(['name' => 'Heat 1']);
+        $race->syncLineup([Competitor::factory()->create()->id]);
+        TimingFeedResult::factory()->live()->create([
+            'name' => 'Heat 1 Live',
+            'standings' => [
+                [
+                    'position' => 1,
+                    'number' => '12',
+                    'transponder' => '12000',
+                    'laps' => 5,
+                    'total_time' => '00:01:00.000',
+                    'first_name' => 'Ann',
+                    'last_name' => 'First',
+                    'last_lap' => '16.500',
+                ],
+                [
+                    'position' => 2,
+                    'number' => '7',
+                    'transponder' => '7000',
+                    'laps' => 5,
+                    'total_time' => '00:01:01.234',
+                    'first_name' => 'Bob',
+                    'last_name' => 'Second',
+                ],
+            ],
+        ]);
+
+        $this->get(route('results'))
+            ->assertOk()
+            ->assertSee('>Last</th>', false)
+            ->assertSee('>Best</th>', false)
+            ->assertSee('Gap')
+            ->assertSee('Diff')
+            ->assertSee('Speed')
+            ->assertSee('54.545')
+            ->assertSee('+1.234')
+            ->assertSee('bg-zinc-950', false)
+            ->assertDontSee('>00:01:00.000<', false);
+    }
+
+    public function test_applying_a_feed_result_scores_drivers_by_transponder(): void
+    {
+        $type = RaceType::factory()->create(['has_results' => true]);
+        $race = Race::factory()->for($type)->create(['name' => 'Heat 1']);
+        $winner = Competitor::factory()->create(['transponder' => '52474', 'car_number' => '12']);
+        $second = Competitor::factory()->create(['transponder' => '11111', 'car_number' => '7']);
+        $race->syncLineup([$winner->id, $second->id]);
+        $result = TimingFeedResult::factory()->live()->create([
+            'name' => 'Orbits Heat 1',
+            'standings' => [
+                ['position' => 1, 'number' => '12', 'transponder' => '52474'],
+                ['position' => 2, 'number' => '7', 'transponder' => '11111'],
+            ],
+        ]);
+
+        Livewire::test('pages::results')
+            ->assertSee('Orbits Heat 1')
+            ->set('feedResultByRace.'.$race->id, (string) $result->id)
+            ->call('applyFeedResult', $race->id)
+            ->assertDispatched('notify', message: 'Applied 2 finishes to Heat 1.')
+            ->assertDontSee('Orbits Heat 1')
+            ->assertDontSee('Live timing');
+
+        $this->assertSame(1, $race->entries()->where('competitor_id', $winner->id)->first()->finish_position);
+        $this->assertSame(2, $race->entries()->where('competitor_id', $second->id)->first()->finish_position);
+        $this->assertSame(TimingStatus::Complete, $race->fresh()->timing_status);
+        $this->assertNotNull($result->fresh()->applied_at);
+        $this->assertFalse($result->fresh()->is_live);
+        $this->assertSame($race->id, $result->fresh()->applied_to_race_id);
+
+        $this->get(route('results'))
+            ->assertOk()
+            ->assertDontSee('Orbits Heat 1')
+            ->assertDontSee('Live timing');
+    }
+
+    public function test_applying_a_feed_result_falls_back_to_car_number(): void
+    {
+        $type = RaceType::factory()->create(['has_results' => true]);
+        $race = Race::factory()->for($type)->create(['name' => 'Heat 1']);
+        $winner = Competitor::factory()->create(['transponder' => '99999', 'car_number' => '12']);
+        $race->syncLineup([$winner->id]);
+        $result = TimingFeedResult::factory()->create([
+            'standings' => [
+                ['position' => 1, 'number' => '12', 'transponder' => '52474'],
+            ],
+        ]);
+
+        Livewire::test('pages::results')
+            ->set('feedResultByRace.'.$race->id, (string) $result->id)
+            ->call('applyFeedResult', $race->id)
+            ->assertHasNoErrors();
+
+        $this->assertSame(1, $race->entries()->where('competitor_id', $winner->id)->first()->finish_position);
+    }
+
+    public function test_applying_a_feed_result_does_not_score_when_nobody_matches(): void
+    {
+        $type = RaceType::factory()->create(['has_results' => true]);
+        $race = Race::factory()->for($type)->create(['name' => 'Heat 1']);
+        $driver = Competitor::factory()->create(['transponder' => '1', 'car_number' => '1']);
+        $race->syncLineup([$driver->id]);
+        $result = TimingFeedResult::factory()->create();
+
+        Livewire::test('pages::results')
+            ->set('feedResultByRace.'.$race->id, (string) $result->id)
+            ->call('applyFeedResult', $race->id)
+            ->assertDispatched('notify', message: 'No drivers in Heat 1 matched that feed result.');
+
+        $this->assertNull($race->entries()->where('competitor_id', $driver->id)->first()->finish_position);
+        $this->assertNull($result->fresh()->applied_at);
+        $this->assertSame(TimingStatus::Pending, $race->fresh()->timing_status);
     }
 
     public function test_timing_users_cannot_open_results(): void

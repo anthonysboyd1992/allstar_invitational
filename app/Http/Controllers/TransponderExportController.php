@@ -246,10 +246,7 @@ class TransponderExportController extends Controller
 
     private function authorizeLineupFeed(Request $request): void
     {
-        $expected = (string) Setting::get(Setting::TimingFeedToken, '');
-        $provided = $request->string('token')->toString();
-
-        abort_unless(filled($expected) && filled($provided) && hash_equals($expected, $provided), 403);
+        abort_unless(Setting::timingFeedTokenMatches($request->string('token')->toString()), 403);
     }
 
     /**

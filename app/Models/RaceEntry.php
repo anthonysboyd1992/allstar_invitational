@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['race_id', 'competitor_id', 'car_id', 'start_position', 'finish_position', 'source_race_id'])]
+#[Fillable(['race_id', 'competitor_id', 'car_id', 'start_position', 'break_position', 'invert_start_position', 'finish_position', 'source_race_id'])]
 class RaceEntry extends Model
 {
     /**
@@ -45,14 +45,33 @@ class RaceEntry extends Model
 
     /**
      * Positions gained (positive) or lost from start to finish.
+     * After a pit invert this is first-half gain plus second-half gain.
      */
     public function charge(): ?int
     {
-        if ($this->start_position === null || $this->finish_position === null) {
+        return $this->liveCharge($this->finish_position);
+    }
+
+    /**
+     * Hard-charger gain versus a live or official position.
+     */
+    public function liveCharge(?int $currentPosition): ?int
+    {
+        $start = (int) ($this->start_position ?? 0);
+        $current = (int) ($currentPosition ?? 0);
+
+        if ($start < 1 || $current < 1) {
             return null;
         }
 
-        return (int) $this->start_position - (int) $this->finish_position;
+        $break = (int) ($this->break_position ?? 0);
+        $restart = (int) ($this->invert_start_position ?? 0);
+
+        if ($break > 0 && $restart > 0) {
+            return ($start - $break) + ($restart - $current);
+        }
+
+        return $start - $current;
     }
 
     /**
@@ -78,6 +97,8 @@ class RaceEntry extends Model
     {
         return [
             'start_position' => 'integer',
+            'break_position' => 'integer',
+            'invert_start_position' => 'integer',
             'finish_position' => 'integer',
             'source_race_id' => 'integer',
         ];

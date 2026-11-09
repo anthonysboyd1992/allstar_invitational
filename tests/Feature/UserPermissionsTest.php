@@ -19,6 +19,7 @@ class UserPermissionsTest extends TestCase
         $this->actingAs(User::factory()->withAreas(User::Presets['timing']['areas'])->create());
 
         $this->get(route('timing'))->assertOk();
+        $this->get(route('live-timing'))->assertOk();
         $this->get(route('exports.transponders', $race))->assertOk();
         $this->get(route('exports.race-zip', $race))->assertOk();
         $this->get(route('exports.type-transponders', $race->raceType))->assertOk();
@@ -36,6 +37,7 @@ class UserPermissionsTest extends TestCase
         $this->get(route('vmix'))->assertOk();
         $this->get(route('vmix-data'))->assertOk();
         $this->get(route('timing'))->assertForbidden();
+        $this->get(route('live-timing'))->assertForbidden();
         $this->get(route('exports.timing-puller'))->assertForbidden();
         $this->get(route('settings'))->assertForbidden();
         $this->get(route('users'))->assertForbidden();
@@ -56,6 +58,7 @@ class UserPermissionsTest extends TestCase
 
         $this->get(route('timing'))
             ->assertSee('href="'.route('timing').'"', false)
+            ->assertSee('href="'.route('live-timing').'"', false)
             ->assertDontSee('href="'.route('cars').'"', false)
             ->assertDontSee('href="'.route('vmix').'"', false)
             ->assertDontSee('href="'.route('users').'"', false)

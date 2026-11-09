@@ -24,5 +24,7 @@ class AppServiceProvider extends ServiceProvider
         foreach (array_keys(User::Areas) as $area) {
             Gate::define("access-{$area}", fn (User $user): bool => $user->canAccessArea($area));
         }
+
+        Gate::define('access-live-timing', fn (User $user): bool => $user->canAccessArea('timing') || $user->canAccessArea('results'));
     }
 }

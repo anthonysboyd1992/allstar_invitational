@@ -5,6 +5,7 @@ use App\Http\Controllers\HomeController;
 use App\Http\Controllers\LineupPrintController;
 use App\Http\Controllers\LogoutController;
 use App\Http\Controllers\ResultsPrintController;
+use App\Http\Controllers\TimingFeedResultController;
 use App\Http\Controllers\TimingPullerDownloadController;
 use App\Http\Controllers\TransponderExportController;
 use App\Http\Controllers\VmixFeedController;
@@ -29,6 +30,7 @@ Route::middleware('auth')->group(function () {
         Route::livewire('/results', 'pages::results')->name('results');
         Route::get('/results/print', ResultsPrintController::class)->name('results.print');
     });
+    Route::livewire('/live-timing', 'pages::live-timing')->middleware('can:access-live-timing')->name('live-timing');
     Route::livewire('/vmix', 'pages::vmix')->middleware('can:access-vmix')->name('vmix');
     Route::livewire('/vmix-data', 'pages::vmix-data')->middleware('can:access-vmix-data')->name('vmix-data');
     Route::livewire('/settings', 'pages::settings')->middleware('can:access-settings')->name('settings');
@@ -54,3 +56,5 @@ Route::get('/vmix/driver.json', [VmixFeedController::class, 'driver'])->name('fe
 Route::get('/vmix/data.json', [VmixFeedController::class, 'data'])->name('feeds.data');
 Route::get('/vmix/clear.png', [VmixFeedController::class, 'clear'])->name('feeds.clear');
 Route::get('/timing/lineups.json', [TransponderExportController::class, 'lineups'])->name('feeds.timing-lineups');
+Route::post('/timing/results.json', [TimingFeedResultController::class, 'store'])->name('feeds.timing-results');
+Route::post('/timing/results/disconnect.json', [TimingFeedResultController::class, 'disconnect'])->name('feeds.timing-results-disconnect');

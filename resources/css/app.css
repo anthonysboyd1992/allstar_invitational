@@ -2,6 +2,8 @@
 
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
+@source '../views/**/*.blade.php';
+@source '../js/**/*.js';
 @source inline('hover:bg-green-700 hover:ring-green-400');
 
 @theme {
@@ -19,4 +21,37 @@
 
 body.sorting {
     @apply cursor-grabbing select-none;
+}
+
+html.timing-fullscreen,
+html.timing-fullscreen body {
+    background-color: #09090b;
+}
+
+html.timing-fullscreen header {
+    display: none;
+}
+
+html.timing-fullscreen main {
+    padding: 0;
+    overflow: hidden;
+}
+
+html.timing-fullscreen .timing-tower {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    height: 100vh;
+    height: 100dvh;
+    flex-direction: column;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+html.timing-fullscreen .timing-tower-table {
+    max-height: none !important;
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow: auto;
 }

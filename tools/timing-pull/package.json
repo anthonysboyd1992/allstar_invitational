@@ -19,6 +19,7 @@
         "files": [
             "main.js",
             "preload.js",
+            "rmonitor.js",
             "renderer/**/*"
         ],
         "win": {
