@@ -1,6 +1,8 @@
 <?php
 
+use App\Http\Controllers\BestTimesPrintController;
 use App\Http\Controllers\EntryListPrintController;
+use App\Http\Controllers\HardChargerPrintController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\LineupPrintController;
 use App\Http\Controllers\LogoutController;
@@ -29,6 +31,8 @@ Route::middleware('auth')->group(function () {
     Route::middleware('can:access-results')->group(function () {
         Route::livewire('/results', 'pages::results')->name('results');
         Route::get('/results/print', ResultsPrintController::class)->name('results.print');
+        Route::get('/results/hard-charger/print', HardChargerPrintController::class)->name('results.hard-charger.print');
+        Route::get('/results/best-times/print', BestTimesPrintController::class)->name('results.best-times.print');
     });
     Route::livewire('/live-timing', 'pages::live-timing')->middleware('can:access-live-timing')->name('live-timing');
     Route::livewire('/vmix', 'pages::vmix')->middleware('can:access-vmix')->name('vmix');

@@ -117,6 +117,8 @@ class SettingsPageTest extends TestCase
         foreach ([
             route('lineups.print') => 'Lineups',
             route('results.print') => 'Results',
+            route('results.hard-charger.print') => 'Hard Charger',
+            route('results.best-times.print') => 'Best Times',
         ] as $url => $kind) {
             $this->get($url)
                 ->assertOk()

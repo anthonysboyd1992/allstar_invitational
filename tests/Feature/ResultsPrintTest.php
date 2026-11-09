@@ -73,11 +73,13 @@ class ResultsPrintTest extends TestCase
                 'class="charge charge-up">+1</td>',
                 'class="pos">2</td>',
                 'Conner Zbozien',
-                'class="charge charge-down">-1</td>',
+                'class="charge"></td>',
                 'class="pos">3</td>',
                 'Max Stambaugh',
                 'class="charge"></td>',
             ], false)
+            ->assertDontSee('charge-down', false)
+            ->assertDontSee('>-1<', false)
             ->assertDontSee('class="weight"', false)
             ->assertDontSee('class="pill"', false)
             ->assertDontSee('Print entry list')

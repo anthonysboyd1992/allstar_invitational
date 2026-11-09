@@ -3,6 +3,7 @@
 use App\Models\Race;
 use App\Models\RaceEntry;
 use App\Models\RaceType;
+use App\Models\Setting;
 use App\Models\TimingFeedResult;
 use App\TimingStatus;
 use App\Services\TimingFeedStats;
@@ -145,6 +146,13 @@ new #[Title('Results')] class extends Component
         $this->dispatch('notify', message: 'Deleted '.$session->name.'.');
     }
 
+    public function resetDayPasses(): void
+    {
+        Setting::resetDayPasses();
+        unset($this->liveSummary);
+        $this->dispatch('notify', message: 'Day passes reset. Earlier sessions no longer count.');
+    }
+
     /**
      * @return array{laps: ?int, race_laps: ?int, transfer_after: ?int, fastest_race: ?array{label: string, time: string, speed: string, number: string}, fastest_day: ?array{label: string, time: string, speed: string, number: string, session: string}, hard_charger: ?array{label: string, gain: int, number: string}, hard_charger_day: ?array{label: string, gain: int, number: string, session: string}, most_passes: ?array{label: string, passes: int, number: string}}|null
      */
@@ -196,6 +204,14 @@ new #[Title('Results')] class extends Component
 
     public function openInvert(int $raceId): void
     {
+        $race = Race::query()->with('raceType')->findOrFail($raceId);
+
+        if (! $race->raceType->has_invert) {
+            $this->dispatch('notify', message: 'Turn on Pit invert for '.$race->raceType->name.' on Lineups.', type: 'error');
+
+            return;
+        }
+
         if ($this->liveFeed === null) {
             $this->dispatch('notify', message: 'Need a live timing board to invert.', type: 'error');
 
@@ -241,7 +257,13 @@ new #[Title('Results')] class extends Component
 
     public function invertFromLive(int $raceId): void
     {
-        $race = Race::query()->with('entries.competitor')->findOrFail($raceId);
+        $race = Race::query()->with(['entries.competitor', 'raceType'])->findOrFail($raceId);
+
+        if (! $race->raceType->has_invert) {
+            $this->dispatch('notify', message: 'Turn on Pit invert for '.$race->raceType->name.' on Lineups.', type: 'error');
+
+            return;
+        }
 
         if ($race->isInverted()) {
             $this->dispatch('notify', message: 'Undo invert on '.$race->name.' first.', type: 'error');
@@ -375,14 +397,37 @@ new #[Title('Results')] class extends Component
 
     public function printSheetUrl(): ?string
     {
-        $ids = collect($this->printRaceIds)
+        return $this->printUrlFor('results.print');
+    }
+
+    public function printHardChargerUrl(): ?string
+    {
+        return $this->printUrlFor('results.hard-charger.print');
+    }
+
+    public function printBestTimesUrl(): ?string
+    {
+        return $this->printUrlFor('results.best-times.print');
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function selectedPrintRaceIds(): array
+    {
+        return collect($this->printRaceIds)
             ->map(fn ($id): int => (int) $id)
             ->filter()
             ->unique()
             ->values()
             ->all();
+    }
 
-        return $ids === [] ? null : route('results.print', ['races' => $ids]);
+    private function printUrlFor(string $route): ?string
+    {
+        $ids = $this->selectedPrintRaceIds();
+
+        return $ids === [] ? null : route($route, ['races' => $ids]);
     }
 
     public function flagClasses(?string $flag): string
@@ -427,7 +472,7 @@ new #[Title('Results')] class extends Component
                     <h2 class="text-lg font-black uppercase">Print</h2>
                     <button type="button" wire:click="closePrintPicker" class="rounded px-2 text-2xl leading-none text-slate-400 hover:text-slate-900">&times;</button>
                 </div>
-                <p class="mb-3 text-sm text-slate-500">Choose the races to put on the landscape results sheet.</p>
+                <p class="mb-3 text-sm text-slate-500">Choose the races for the landscape results, hard charger, or best times sheet.</p>
                 <div class="mb-3 flex gap-2 text-xs font-bold">
                     <button type="button" wire:click="selectAllPrintRaces" class="rounded px-2 py-1 ring-1 ring-slate-300 hover:bg-slate-50">Select all</button>
                     <button type="button" wire:click="clearPrintRaces" class="rounded px-2 py-1 ring-1 ring-slate-300 hover:bg-slate-50">Clear</button>
@@ -460,6 +505,16 @@ new #[Title('Results')] class extends Component
                 <div class="mt-5 flex flex-wrap justify-end gap-2">
                     <button type="button" wire:click="closePrintPicker" class="rounded-md px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">Cancel</button>
                     <a
+                        href="{{ $this->printBestTimesUrl() ?? '#' }}"
+                        target="_blank"
+                        @class(['rounded-md px-4 py-2 text-sm font-semibold', 'bg-white text-slate-900 ring-1 ring-slate-300 hover:bg-slate-50' => $this->printBestTimesUrl(), 'pointer-events-none bg-slate-200 text-slate-400' => ! $this->printBestTimesUrl()])
+                    >Print best times</a>
+                    <a
+                        href="{{ $this->printHardChargerUrl() ?? '#' }}"
+                        target="_blank"
+                        @class(['rounded-md px-4 py-2 text-sm font-semibold', 'bg-white text-slate-900 ring-1 ring-slate-300 hover:bg-slate-50' => $this->printHardChargerUrl(), 'pointer-events-none bg-slate-200 text-slate-400' => ! $this->printHardChargerUrl()])
+                    >Print hard charger</a>
+                    <a
                         href="{{ $this->printSheetUrl() ?? '#' }}"
                         target="_blank"
                         @class(['rounded-md px-4 py-2 text-sm font-semibold', 'bg-slate-900 text-white hover:bg-slate-700' => $this->printSheetUrl(), 'pointer-events-none bg-slate-200 text-slate-400' => ! $this->printSheetUrl()])
@@ -474,14 +529,22 @@ new #[Title('Results')] class extends Component
             <h1 class="text-2xl font-black uppercase">Results</h1>
             <p class="mt-2 text-sm text-slate-500">Click a driver in the lineup to score them, or pick a timing feed result the puller sent. Drag the results list to fix a mistake.</p>
         </div>
-        <button type="button" wire:click="openPrintPicker" class="rounded-md bg-white px-3 py-1.5 text-sm font-semibold ring-1 ring-slate-300 hover:bg-slate-50">Print results</button>
+        <div class="flex flex-wrap gap-2">
+            <button
+                type="button"
+                wire:click="resetDayPasses"
+                wire:confirm="Clear most-passes and hard-charger-today totals from earlier sessions? Scored finishes stay. The live board still counts."
+                class="rounded-md bg-white px-3 py-1.5 text-sm font-semibold ring-1 ring-slate-300 hover:bg-slate-50"
+            >Reset day passes</button>
+            <button type="button" wire:click="openPrintPicker" class="rounded-md bg-white px-3 py-1.5 text-sm font-semibold ring-1 ring-slate-300 hover:bg-slate-50">Print results</button>
+        </div>
     </div>
 
     @island
     <div class="contents" wire:poll.500ms>
     @if ($this->liveFeed)
         @php
-            $liveStandings = (new TimingFeedStats)->withIntervals($this->liveFeed->orderedStandings());
+            $liveStandings = (new TimingFeedStats)->withBoardStats($this->liveFeed, $this->liveFeed->orderedStandings());
             $liveSummary = $this->liveSummary;
         @endphp
         <div
@@ -544,7 +607,7 @@ new #[Title('Results')] class extends Component
                     @if ($liveSummary['hard_charger'] ?? null)
                         <div>
                             <p class="text-[10px] font-semibold tracking-[0.18em] text-zinc-500 uppercase">Hard charger</p>
-                            <p class="mt-1 text-sm font-medium">{{ $liveSummary['hard_charger']['label'] }} <span class="font-mono text-emerald-400">+{{ $liveSummary['hard_charger']['gain'] }}</span></p>
+                            <p class="mt-1 text-sm font-medium">{{ $liveSummary['hard_charger']['label'] }} <span class="timing-charge-leader inline-flex rounded px-1.5 py-0.5 font-mono">+{{ $liveSummary['hard_charger']['gain'] }}</span></p>
                         </div>
                     @endif
                     @if ($liveSummary['hard_charger_day'] ?? null)
@@ -575,6 +638,7 @@ new #[Title('Results')] class extends Component
                             <th class="px-5 py-3 text-right sm:px-6">Pos</th>
                             <th class="px-3 py-3">No</th>
                             <th class="px-3 py-3">Driver</th>
+                            <th class="px-3 py-3 text-right">Charge</th>
                             <th class="px-3 py-3 text-right">Laps</th>
                             <th class="px-3 py-3 text-right">Last</th>
                             <th class="px-3 py-3 text-right">Best</th>
@@ -589,6 +653,9 @@ new #[Title('Results')] class extends Component
                                 $carNumber = $row['number'] !== '' ? $row['number'] : $row['registration'];
                                 $isFastest = ($liveSummary['fastest_race']['number'] ?? null) === $carNumber;
                                 $isPersonalBest = ($row['last_lap'] ?? '') !== '' && ($row['best_lap'] ?? '') !== '' && $row['last_lap'] === $row['best_lap'];
+                                $charge = (int) ($row['charge'] ?? 0);
+                                $isRaceCharge = (bool) ($row['is_race_charge'] ?? false);
+                                $isDayCharge = $charge > 0 && ! $isRaceCharge && ($liveSummary['hard_charger_day']['number'] ?? null) === $carNumber;
                                 $next = $liveStandings[$index + 1] ?? null;
                                 $cutoff = $liveSummary['transfer_after'] ?? null;
                                 $showTransfer = $cutoff !== null
@@ -610,6 +677,17 @@ new #[Title('Results')] class extends Component
                                     <span @class(['inline-flex min-w-10 justify-center px-1.5 py-0.5 font-mono text-sm font-bold', 'bg-black text-amber-400' => $isFastest, 'bg-amber-400 text-slate-900' => ! $isFastest])>{{ $carNumber }}</span>
                                 </td>
                                 <td class="px-3 py-3 font-medium tracking-wide">{{ trim($row['first_name'].' '.$row['last_name']) }}</td>
+                                <td class="px-3 py-3 text-right">
+                                    @if (($row['formatted_charge'] ?? '') !== '')
+                                        <span @class([
+                                            'inline-flex justify-center px-1.5 py-0.5 font-mono text-sm font-bold tabular-nums',
+                                            'timing-charge-leader rounded' => $isRaceCharge,
+                                            'rounded bg-sky-400 text-slate-950' => $isDayCharge,
+                                            'text-zinc-700' => $isFastest && ! $isRaceCharge && ! $isDayCharge,
+                                            'text-zinc-500' => ! $isFastest && ! $isRaceCharge && ! $isDayCharge,
+                                        ])>{{ $row['formatted_charge'] }}</span>
+                                    @endif
+                                </td>
                                 <td @class(['px-3 py-3 text-right font-mono font-semibold tabular-nums', 'text-slate-900' => $isFastest, 'text-amber-400' => ! $isFastest])>
                                     @if ($row['laps'] !== null && ($liveSummary['race_laps'] ?? null))
                                         {{ $row['laps'] }}/{{ $liveSummary['race_laps'] }}
@@ -629,12 +707,12 @@ new #[Title('Results')] class extends Component
                             </tr>
                             @if ($showTransfer)
                                 <tr wire:key="results-transfer-{{ $this->liveFeed->id }}">
-                                    <td colspan="9" class="bg-red-600 py-1.5 text-center text-[10px] font-bold tracking-[0.28em] text-white uppercase">Transfer · Top {{ $cutoff }}</td>
+                                    <td colspan="10" class="bg-red-600 py-1.5 text-center text-[10px] font-bold tracking-[0.28em] text-white uppercase">Transfer · Top {{ $cutoff }}</td>
                                 </tr>
                             @endif
                         @empty
                             <tr>
-                                <td colspan="9" class="px-5 py-10 text-center text-zinc-500">Race Manager is connected. Waiting for cars.</td>
+                                <td colspan="10" class="px-5 py-10 text-center text-zinc-500">Race Manager is connected. Waiting for cars.</td>
                             </tr>
                         @endforelse
                     </tbody>
@@ -736,7 +814,7 @@ new #[Title('Results')] class extends Component
                                         wire:click="undoInvert({{ $race->id }})"
                                         class="rounded px-2.5 py-1 text-xs font-bold text-slate-700 ring-1 ring-slate-300 hover:bg-white"
                                     >Undo invert</button>
-                                @elseif ($this->liveFeed)
+                                @elseif ($this->liveFeed && $race->raceType->has_invert)
                                     <button
                                         type="button"
                                         wire:click="openInvert({{ $race->id }})"

@@ -90,6 +90,7 @@ class TimingFeedStatsTest extends TestCase
             ],
         ]);
 
+        $rows = (new TimingFeedStats)->withLineupStats($session->orderedStandings(), $race);
         $stats = (new TimingFeedStats)->summarize($session, $session->orderedStandings());
 
         $this->assertTrue($stats['matched']);
@@ -97,6 +98,10 @@ class TimingFeedStatsTest extends TestCase
         $this->assertSame(1, $stats['hard_charger']['gain']);
         $this->assertSame(1, $stats['most_passes']['passes']);
         $this->assertSame(8, $stats['race_laps']);
+        $this->assertSame('+1', $rows[0]['formatted_charge']);
+        $this->assertTrue($rows[0]['is_race_charge']);
+        $this->assertSame('-1', $rows[1]['formatted_charge']);
+        $this->assertFalse($rows[1]['is_race_charge']);
     }
 
     public function test_hard_charger_of_another_race_is_listed_for_the_day(): void
@@ -128,6 +133,122 @@ class TimingFeedStatsTest extends TestCase
         $this->assertSame('#44 Cara Charge', $stats['hard_charger_day']['label']);
         $this->assertSame(8, $stats['hard_charger_day']['gain']);
         $this->assertSame('Heat 1', $stats['hard_charger_day']['session']);
+    }
+
+    public function test_day_totals_include_applied_heats_even_when_the_feed_is_named_scoreboard(): void
+    {
+        $type = RaceType::factory()->create(['has_results' => true]);
+        $heat = Race::factory()->for($type)->create(['name' => 'Heat 1']);
+        $dash = Race::factory()->for($type)->create(['name' => 'Dash']);
+        $ann = Competitor::factory()->create([
+            'car_number' => '12',
+            'transponder' => '12000',
+            'first_name' => 'Ann',
+            'last_name' => 'First',
+        ]);
+        $bob = Competitor::factory()->create([
+            'car_number' => '7',
+            'transponder' => '7000',
+            'first_name' => 'Bob',
+            'last_name' => 'Second',
+        ]);
+        $heat->syncLineup([$bob->id, $ann->id]);
+        $dash->syncLineup([$bob->id, $ann->id]);
+
+        TimingFeedResult::factory()->applied()->create([
+            'name' => 'SCOREBOARD',
+            'applied_to_race_id' => $heat->id,
+            'standings' => [
+                $this->standing(1, '12', 'Ann', 'First', ['transponder' => '12000']),
+            ],
+        ]);
+        $live = TimingFeedResult::factory()->live()->create([
+            'name' => 'Dash',
+            'standings' => [
+                $this->standing(1, '7', 'Bob', 'Second', ['transponder' => '7000']),
+            ],
+        ]);
+
+        $stats = (new TimingFeedStats)->summarize($live, $live->orderedStandings());
+
+        $this->assertSame('#12 Ann First', $stats['hard_charger_day']['label']);
+        $this->assertSame(1, $stats['hard_charger_day']['gain']);
+        $this->assertSame('SCOREBOARD', $stats['hard_charger_day']['session']);
+        $this->assertSame('#12 Ann First', $stats['most_passes']['label']);
+        $this->assertSame(1, $stats['most_passes']['passes']);
+    }
+
+    public function test_resetting_day_passes_drops_earlier_sessions_and_keeps_the_live_board(): void
+    {
+        $type = RaceType::factory()->create(['has_results' => true]);
+        $heat = Race::factory()->for($type)->create(['name' => 'Heat 1']);
+        $dash = Race::factory()->for($type)->create(['name' => 'Dash']);
+        $ann = Competitor::factory()->create([
+            'car_number' => '12',
+            'transponder' => '12000',
+            'first_name' => 'Ann',
+            'last_name' => 'First',
+        ]);
+        $bob = Competitor::factory()->create([
+            'car_number' => '7',
+            'transponder' => '7000',
+            'first_name' => 'Bob',
+            'last_name' => 'Second',
+        ]);
+        $heat->syncLineup([$bob->id, $ann->id]);
+        $dash->syncLineup([$ann->id, $bob->id]);
+
+        TimingFeedResult::factory()->applied()->create([
+            'name' => 'Heat 1',
+            'applied_to_race_id' => $heat->id,
+            'standings' => [
+                $this->standing(1, '12', 'Ann', 'First', ['transponder' => '12000']),
+            ],
+        ]);
+        $live = TimingFeedResult::factory()->live()->create([
+            'name' => 'Dash',
+            'standings' => [
+                $this->standing(1, '7', 'Bob', 'Second', ['transponder' => '7000']),
+            ],
+        ]);
+
+        Setting::resetDayPasses();
+        $stats = (new TimingFeedStats)->summarize($live, $live->orderedStandings());
+
+        $this->assertNull($stats['hard_charger_day']);
+        $this->assertSame('#7 Bob Second', $stats['hard_charger']['label']);
+        $this->assertSame(1, $stats['hard_charger']['gain']);
+        $this->assertSame(1, $stats['most_passes']['passes']);
+        $this->assertSame('#7 Bob Second', $stats['most_passes']['label']);
+    }
+
+    public function test_hard_charger_tie_goes_to_the_driver_who_finished_further_ahead(): void
+    {
+        $type = RaceType::factory()->create(['has_results' => true]);
+        $race = Race::factory()->for($type)->create(['name' => 'Heat 1']);
+        $ann = Competitor::factory()->create(['car_number' => '31', 'transponder' => '31000', 'first_name' => 'Ann', 'last_name' => 'First']);
+        $bob = Competitor::factory()->create(['car_number' => '32', 'transponder' => '32000', 'first_name' => 'Bob', 'last_name' => 'Second']);
+        $cara = Competitor::factory()->create(['car_number' => '33', 'transponder' => '33000', 'first_name' => 'Cara', 'last_name' => 'Third']);
+        $extra = Competitor::factory()->create(['car_number' => '34', 'transponder' => '34000']);
+        $race->syncLineup([$cara->id, $extra->id, $ann->id, $bob->id]);
+
+        $session = TimingFeedResult::factory()->create([
+            'name' => 'Heat 1',
+            'standings' => [
+                $this->standing(2, '31', 'Ann', 'First', ['transponder' => '31000']),
+                $this->standing(3, '32', 'Bob', 'Second', ['transponder' => '32000']),
+            ],
+        ]);
+
+        $rows = (new TimingFeedStats)->withLineupStats($session->orderedStandings(), $race->fresh(['entries.competitor']));
+        $stats = (new TimingFeedStats)->summarize($session, $session->orderedStandings());
+
+        $this->assertSame('+1', $rows[0]['formatted_charge']);
+        $this->assertSame('+1', $rows[1]['formatted_charge']);
+        $this->assertTrue($rows[0]['is_race_charge']);
+        $this->assertFalse($rows[1]['is_race_charge']);
+        $this->assertSame('#31 Ann First', $stats['hard_charger']['label']);
+        $this->assertSame(1, $stats['hard_charger']['gain']);
     }
 
     public function test_most_passes_today_adds_lineup_gains_across_matched_races(): void
@@ -183,10 +304,10 @@ class TimingFeedStatsTest extends TestCase
         $this->assertSame(4, $stats['transfer_after']);
     }
 
-    public function test_fastest_lap_of_the_day_skips_ignored_sessions(): void
+    public function test_fastest_lap_of_the_day_includes_ignored_sessions(): void
     {
         TimingFeedResult::factory()->ignored()->create([
-            'name' => 'Practice',
+            'name' => 'Hot Laps',
             'standings' => [
                 $this->standing(1, '12', 'Ann', 'First', ['best_lap' => '15.100']),
             ],
@@ -201,7 +322,9 @@ class TimingFeedStatsTest extends TestCase
         $stats = (new TimingFeedStats)->summarize($heat, $heat->orderedStandings());
 
         $this->assertSame('#7 Bob Second', $stats['fastest_race']['label']);
-        $this->assertNull($stats['fastest_day']);
+        $this->assertSame('#12 Ann First', $stats['fastest_day']['label']);
+        $this->assertSame('15.100', $stats['fastest_day']['time']);
+        $this->assertSame('Hot Laps', $stats['fastest_day']['session']);
     }
 
     public function test_diff_is_behind_the_leader_and_gap_is_behind_the_car_ahead(): void
@@ -266,6 +389,42 @@ class TimingFeedStatsTest extends TestCase
 
         $this->assertSame('6.090', $rows[0]['last_lap']);
         $this->assertSame('5.370', $rows[0]['best_lap']);
+    }
+
+    public function test_best_laps_for_a_race_use_that_session_and_the_whole_day(): void
+    {
+        $type = RaceType::factory()->create(['has_results' => true]);
+        $race = Race::factory()->for($type)->create(['name' => 'Heat 1']);
+        $ann = Competitor::factory()->create([
+            'car_number' => '12',
+            'transponder' => '12000',
+            'first_name' => 'Ann',
+            'last_name' => 'First',
+        ]);
+        $race->syncLineup([$ann->id]);
+
+        TimingFeedResult::factory()->ignored()->create([
+            'name' => 'Hot Laps',
+            'standings' => [
+                $this->standing(1, '12', 'Ann', 'First', ['transponder' => '12000', 'best_lap' => '16.100']),
+            ],
+        ]);
+        $heat = TimingFeedResult::factory()->applied()->create([
+            'name' => 'Heat 1',
+            'applied_to_race_id' => $race->id,
+            'standings' => [
+                $this->standing(1, '12', 'Ann', 'First', ['transponder' => '12000', 'best_lap' => '16.400']),
+            ],
+        ]);
+
+        $laps = (new TimingFeedStats)->bestLapsForRace(
+            $race->fresh(['entries.competitor']),
+            TimingFeedResult::query()->orderBy('id')->get(),
+        );
+
+        $this->assertSame('16.400', $laps[$race->entries->first()->id]['race']);
+        $this->assertSame('16.100', $laps[$race->entries->first()->id]['day']);
+        $this->assertTrue((new TimingFeedStats)->sessionBelongsToRace($heat->fresh(), $race));
     }
 
     public function test_laps_use_the_leader_and_scheduled_distance(): void

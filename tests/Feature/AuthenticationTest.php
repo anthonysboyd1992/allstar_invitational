@@ -17,7 +17,7 @@ class AuthenticationTest extends TestCase
     {
         $race = Race::factory()->create();
 
-        foreach ([route('competitors'), route('competitors.print'), route('competitors.print-announcer'), route('lineups'), route('lineups.print'), route('results'), route('results.print'), route('live-timing'), route('vmix'), route('settings'), route('exports.transponders', $race), route('exports.laps', $race), route('exports.race-zip', $race), route('exports.type-transponders', $race->raceType), route('exports.type-laps', $race->raceType), route('exports.type-zip', $race->raceType), route('exports.timing-zip', ['races' => $race->id]), route('exports.timing-puller')] as $url) {
+        foreach ([route('competitors'), route('competitors.print'), route('competitors.print-announcer'), route('lineups'), route('lineups.print'), route('results'), route('results.print'), route('results.hard-charger.print'), route('results.best-times.print'), route('live-timing'), route('vmix'), route('settings'), route('exports.transponders', $race), route('exports.laps', $race), route('exports.race-zip', $race), route('exports.type-transponders', $race->raceType), route('exports.type-laps', $race->raceType), route('exports.type-zip', $race->raceType), route('exports.timing-zip', ['races' => $race->id]), route('exports.timing-puller')] as $url) {
             $this->get($url)->assertRedirect(route('login'));
         }
     }

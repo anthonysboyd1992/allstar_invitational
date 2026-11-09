@@ -20,7 +20,8 @@ class TimingFeedStats
     {
         $race = $this->matchedRace($session);
         $standings = $this->withLineupStats($standings, $race);
-        $all = TimingFeedResult::query()->visible()->orderBy('id')->get();
+        $sessions = TimingFeedResult::query()->orderBy('id')->get();
+        $visible = $sessions->whereNull('ignored_at')->values();
         $fastestRace = $this->fastestIn($standings);
         $hardCharger = $race === null ? null : $this->hardChargerIn($standings);
 
@@ -30,18 +31,18 @@ class TimingFeedStats
             'race_laps' => $this->raceLaps($session, $standings, $race),
             'transfer_after' => $this->transferAfter($race),
             'fastest_race' => $fastestRace,
-            'fastest_day' => $this->distinctSessionHighlight($this->fastestOfDay($all, $session), $session->name),
+            'fastest_day' => $this->distinctSessionHighlight($this->fastestOfDay($sessions, $session), $session->name),
             'hard_charger' => $hardCharger,
             'hard_charger_day' => $this->distinctDayHighlight(
-                $this->hardChargerOfDay($all, $session, $race),
+                $this->hardChargerOfDay($visible, $session, $race),
                 $hardCharger,
                 $session->name,
             ),
-            'most_passes' => $this->mostPassesOfDay($all),
+            'most_passes' => $this->mostPassesOfDay($visible, $session, $race),
         ];
     }
 
-    public function matchedRace(TimingFeedResult $session): ?Race
+    public function matchedRace(TimingFeedResult $session, bool $allowLineupMatch = true): ?Race
     {
         $relations = ['entries.competitor', 'raceType.transferRules'];
         $attached = Race::query()
@@ -53,16 +54,75 @@ class TimingFeedStats
             return $attached;
         }
 
+        $appliedId = (int) ($session->applied_to_race_id ?? 0);
+
+        if ($appliedId > 0) {
+            $applied = Race::query()->with($relations)->find($appliedId);
+
+            if ($applied !== null) {
+                return $applied;
+            }
+        }
+
         $name = trim($session->name);
 
-        if ($name === '') {
+        if ($name !== '') {
+            $named = Race::query()
+                ->with($relations)
+                ->whereRaw('lower(name) = ?', [mb_strtolower($name)])
+                ->first();
+
+            if ($named !== null) {
+                return $named;
+            }
+        }
+
+        if (! $allowLineupMatch) {
             return null;
         }
 
-        return Race::query()
-            ->with($relations)
-            ->whereRaw('lower(name) = ?', [mb_strtolower($name)])
-            ->first();
+        return $this->raceMatchingStandings($session, $relations);
+    }
+
+    /**
+     * Attach a SCOREBOARD (or other unnamed) session to the race whose lineup is on track.
+     *
+     * @param  list<string>  $relations
+     */
+    private function raceMatchingStandings(TimingFeedResult $session, array $relations): ?Race
+    {
+        $standings = $session->orderedStandings();
+
+        if ($standings->count() < 2) {
+            return null;
+        }
+
+        $best = null;
+        $bestMatched = 0;
+        $bestSpread = PHP_INT_MAX;
+
+        foreach (Race::query()->with($relations)->whereHas('entries')->get() as $race) {
+            if ($race->entries->every(fn (RaceEntry $entry): bool => $entry->finish_position !== null)) {
+                continue;
+            }
+
+            $matched = $standings->filter(fn (array $row): bool => $this->matchingEntry($race, $row) !== null)->count();
+            $spread = abs($race->entries->count() - $standings->count());
+
+            if ($matched < 2 || ($matched / $standings->count()) < 0.75) {
+                continue;
+            }
+
+            if ($matched < $bestMatched || ($matched === $bestMatched && $spread >= $bestSpread)) {
+                continue;
+            }
+
+            $best = $race;
+            $bestMatched = $matched;
+            $bestSpread = $spread;
+        }
+
+        return $best;
     }
 
     /**
@@ -73,7 +133,7 @@ class TimingFeedStats
      */
     public function withLineupStats(Collection $standings, ?Race $race): Collection
     {
-        return $standings->map(function (array $row) use ($race): array {
+        $rows = $standings->map(function (array $row) use ($race): array {
             $entry = $race === null ? null : $this->matchingEntry($race, $row);
             $start = (int) ($entry?->start_position ?? 0);
             $position = (int) ($row['position'] ?? 0);
@@ -81,10 +141,31 @@ class TimingFeedStats
 
             $row['start_position'] = $start;
             $row['charge'] = $charge ?? 0;
+            $row['formatted_charge'] = $charge === null ? '' : sprintf('%+d', $charge);
             $row['passes'] = $charge !== null && $charge > 0 ? $charge : 0;
+            $row['is_race_charge'] = false;
 
             return $row;
         });
+
+        $charger = $this->hardChargerIn($rows);
+
+        return $rows->map(function (array $row) use ($charger): array {
+            $row['is_race_charge'] = $charger !== null && $this->carNumber($row) === $charger['number'];
+
+            return $row;
+        });
+    }
+
+    /**
+     * Intervals plus lineup start/charge for a live or idle board.
+     *
+     * @param  Collection<int, array<string, mixed>>  $standings
+     * @return Collection<int, array<string, mixed>>
+     */
+    public function withBoardStats(TimingFeedResult $session, Collection $standings): Collection
+    {
+        return $this->withIntervals($this->withLineupStats($standings, $this->matchedRace($session)));
     }
 
     /**
@@ -147,12 +228,11 @@ class TimingFeedStats
 
     /**
      * @param  Collection<int, array<string, mixed>>  $standings
-     * @return array{label: string, gain: int, number: string}|null
+     * @return array{label: string, gain: int, number: string, position: int}|null
      */
     public function hardChargerIn(Collection $standings): ?array
     {
         $best = null;
-        $bestGain = 0;
 
         foreach ($standings as $row) {
             $start = (int) ($row['start_position'] ?? 0);
@@ -161,15 +241,15 @@ class TimingFeedStats
                 ? (int) $row['charge']
                 : ($start > 0 && $position > 0 ? $start - $position : 0);
 
-            if ($gain <= $bestGain) {
+            if ($gain < 1 || ! $this->isBetterHardCharger($gain, $position, $best)) {
                 continue;
             }
 
-            $bestGain = $gain;
             $best = [
                 'label' => $this->driverLabel($row),
                 'gain' => $gain,
                 'number' => $this->carNumber($row),
+                'position' => $position,
             ];
         }
 
@@ -183,10 +263,13 @@ class TimingFeedStats
     public function hardChargerOfDay(Collection $sessions, TimingFeedResult $current, ?Race $currentRace): ?array
     {
         $best = null;
-        $bestGain = 0;
 
         foreach ($sessions as $session) {
-            $race = $session->is($current) ? $currentRace : $this->matchedRace($session);
+            if (! $this->sessionCountsTowardDayPasses($session, $current)) {
+                continue;
+            }
+
+            $race = $session->is($current) ? $currentRace : $this->matchedRace($session, allowLineupMatch: false);
 
             if ($race === null) {
                 continue;
@@ -195,11 +278,10 @@ class TimingFeedStats
             $standings = $this->withLineupStats($session->orderedStandings(), $race);
             $charger = $this->hardChargerIn($standings);
 
-            if ($charger === null || $charger['gain'] <= $bestGain) {
+            if ($charger === null || ! $this->isBetterHardCharger($charger['gain'], $charger['position'], $best)) {
                 continue;
             }
 
-            $bestGain = $charger['gain'];
             $best = $charger + ['session' => $session->name];
         }
 
@@ -210,12 +292,18 @@ class TimingFeedStats
      * @param  Collection<int, TimingFeedResult>  $sessions
      * @return array{label: string, passes: int, number: string}|null
      */
-    public function mostPassesOfDay(Collection $sessions): ?array
+    public function mostPassesOfDay(Collection $sessions, ?TimingFeedResult $current = null, ?Race $currentRace = null): ?array
     {
         $totals = [];
 
         foreach ($sessions as $session) {
-            $race = $this->matchedRace($session);
+            if (! $this->sessionCountsTowardDayPasses($session, $current)) {
+                continue;
+            }
+
+            $race = ($current !== null && $session->is($current))
+                ? $currentRace
+                : $this->matchedRace($session, allowLineupMatch: false);
 
             if ($race === null) {
                 continue;
@@ -580,6 +668,178 @@ class TimingFeedStats
         }
 
         return $highlight;
+    }
+
+    /**
+     * Race-best from sessions that belong to this race; day-best from every session, including ignored hotlaps.
+     *
+     * @param  Collection<int, TimingFeedResult>  $sessions
+     * @return array<int, array{race: string, day: string}>
+     */
+    public function bestLapsForRace(Race $race, Collection $sessions): array
+    {
+        $dayIndex = $this->bestLapIndex($sessions);
+        $raceSessions = $sessions->filter(fn (TimingFeedResult $session): bool => $this->sessionBelongsToRace($session, $race));
+        $raceIndex = $this->bestLapIndex($raceSessions);
+        $laps = [];
+
+        foreach ($race->entries as $entry) {
+            $keys = $this->entryKeys($entry);
+            $laps[$entry->id] = [
+                'race' => $this->lookupBestLap($raceIndex, $keys),
+                'day' => $this->lookupBestLap($dayIndex, $keys),
+            ];
+        }
+
+        return $laps;
+    }
+
+    /**
+     * @param  Collection<int, TimingFeedResult>  $sessions
+     * @return array<string, array{ms: int, time: string}>
+     */
+    public function bestLapIndex(Collection $sessions): array
+    {
+        $index = [];
+
+        foreach ($sessions as $session) {
+            foreach ($session->orderedStandings() as $row) {
+                $time = $this->usableLap((string) ($row['best_lap'] ?? ''))
+                    ?: $this->usableLap((string) ($row['last_lap'] ?? ''));
+                $ms = $this->lapMs($time);
+
+                if ($ms === null) {
+                    continue;
+                }
+
+                $formatted = $this->formatLap($time);
+
+                foreach ($this->rowKeys($row) as $key) {
+                    if (! isset($index[$key]) || $ms < $index[$key]['ms']) {
+                        $index[$key] = [
+                            'ms' => $ms,
+                            'time' => $formatted,
+                        ];
+                    }
+                }
+            }
+        }
+
+        return $index;
+    }
+
+    public function sessionBelongsToRace(TimingFeedResult $session, Race $race): bool
+    {
+        if ((int) $session->applied_to_race_id === $race->id) {
+            return true;
+        }
+
+        if ((int) $race->live_feed_id === $session->id) {
+            return true;
+        }
+
+        return strcasecmp(trim($session->name), trim($race->name)) === 0;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @return list<string>
+     */
+    public function rowKeys(array $row): array
+    {
+        $keys = [];
+        $transponder = strtolower(trim((string) ($row['transponder'] ?? '')));
+        $number = strtolower($this->carNumber($row));
+
+        if ($transponder !== '') {
+            $keys[] = 't:'.$transponder;
+        }
+
+        if ($number !== '') {
+            $keys[] = 'n:'.$number;
+        }
+
+        return $keys;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function entryKeys(RaceEntry $entry): array
+    {
+        $competitor = $entry->competitor;
+
+        if ($competitor === null) {
+            return [];
+        }
+
+        $keys = [];
+        $transponder = strtolower(trim((string) $competitor->transponder));
+        $number = strtolower(trim((string) $competitor->car_number));
+
+        if ($transponder !== '') {
+            $keys[] = 't:'.$transponder;
+        }
+
+        if ($number !== '') {
+            $keys[] = 'n:'.$number;
+        }
+
+        return $keys;
+    }
+
+    /**
+     * @param  array<string, array{ms: int, time: string}>  $index
+     * @param  list<string>  $keys
+     */
+    public function lookupBestLap(array $index, array $keys): string
+    {
+        $best = null;
+
+        foreach ($keys as $key) {
+            if (! isset($index[$key])) {
+                continue;
+            }
+
+            if ($best === null || $index[$key]['ms'] < $best['ms']) {
+                $best = $index[$key];
+            }
+        }
+
+        return $best['time'] ?? '';
+    }
+
+    private function sessionCountsTowardDayPasses(TimingFeedResult $session, ?TimingFeedResult $current): bool
+    {
+        if ($current !== null && $session->is($current)) {
+            return true;
+        }
+
+        return $session->id > (int) Setting::get(Setting::PassesCountedAfterId, '0');
+    }
+
+    /**
+     * Equal charge loses to the driver who finished further ahead.
+     *
+     * @param  array{gain: int, position: int}|null  $best
+     */
+    private function isBetterHardCharger(int $gain, int $position, ?array $best): bool
+    {
+        if ($best === null) {
+            return true;
+        }
+
+        if ($gain !== $best['gain']) {
+            return $gain > $best['gain'];
+        }
+
+        $bestPosition = (int) ($best['position'] ?? 0);
+
+        if ($position < 1) {
+            return false;
+        }
+
+        return $bestPosition < 1 || $position < $bestPosition;
     }
 
     /**

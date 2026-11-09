@@ -49,6 +49,11 @@ class Setting extends Model
     /**
      * Track length in miles for the timing .dat Length line.
      */
+    /**
+     * Timing sessions at or below this id are omitted from day pass totals.
+     */
+    public const PassesCountedAfterId = 'passes_counted_after_id';
+
     public const TrackLength = 'track_length';
 
     public const DefaultTrackLength = '0.100';
@@ -104,6 +109,14 @@ class Setting extends Model
     /**
      * Track length for timing .dat files, always three decimal places, e.g. "0.100".
      */
+    /**
+     * Stop counting earlier timing sessions toward most-passes and hard-charger-today.
+     */
+    public static function resetDayPasses(): void
+    {
+        static::put(self::PassesCountedAfterId, (string) ((int) TimingFeedResult::query()->max('id')));
+    }
+
     public static function trackLength(): string
     {
         $value = static::get(self::TrackLength, self::DefaultTrackLength);

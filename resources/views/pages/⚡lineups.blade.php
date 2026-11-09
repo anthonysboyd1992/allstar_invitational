@@ -37,7 +37,7 @@ new #[Title('Races & Lineups')] class extends Component
 
     public ?int $editingRaceTypeId = null;
 
-    /** @var array{name?: string, race_name?: string, shows_pill?: bool, has_results?: bool} */
+    /** @var array{name?: string, race_name?: string, shows_pill?: bool, has_results?: bool, has_invert?: bool} */
     public array $typeForm = [];
 
     /**
@@ -306,6 +306,7 @@ new #[Title('Races & Lineups')] class extends Component
             'race_name' => (string) $raceType->race_name,
             'shows_pill' => $raceType->assigns_by_pill,
             'has_results' => $raceType->has_results,
+            'has_invert' => $raceType->has_invert,
         ];
         $this->transferRules = $raceType->transferRules
             ->map(fn (RaceTypeTransferRule $rule): array => [
@@ -357,6 +358,7 @@ new #[Title('Races & Lineups')] class extends Component
             'typeForm.race_name' => ['nullable', 'string', 'max:100'],
             'typeForm.shows_pill' => ['nullable', 'boolean'],
             'typeForm.has_results' => ['nullable', 'boolean'],
+            'typeForm.has_invert' => ['nullable', 'boolean'],
             'transferRules' => ['array'],
             'transferRules.*.position_from' => ['required', 'integer', 'min:1', 'max:50'],
             'transferRules.*.position_to' => ['nullable', 'integer', 'min:1', 'max:50'],
@@ -368,6 +370,7 @@ new #[Title('Races & Lineups')] class extends Component
             'typeForm.race_name' => 'race name',
             'typeForm.shows_pill' => 'show pill',
             'typeForm.has_results' => 'has results',
+            'typeForm.has_invert' => 'pit invert',
             'transferRules.*.position_from' => 'from position',
             'transferRules.*.position_to' => 'to position',
             'transferRules.*.destination_race_type_id' => 'destination',
@@ -380,6 +383,7 @@ new #[Title('Races & Lineups')] class extends Component
             'race_name' => $data['typeForm']['race_name'] !== '' ? $data['typeForm']['race_name'] : null,
             'assigns_by_pill' => (bool) ($data['typeForm']['shows_pill'] ?? false),
             'has_results' => (bool) ($data['typeForm']['has_results'] ?? false),
+            'has_invert' => (bool) ($data['typeForm']['has_invert'] ?? false),
         ]);
 
         $keptIds = [];
@@ -984,6 +988,14 @@ new #[Title('Races & Lineups')] class extends Component
                         <span>
                             <span class="font-semibold text-slate-800">Has results</span>
                             <span class="mt-0.5 block text-xs text-slate-500">Show this type on the Results page. Finish order is entered there, then Calculate fills destination lineups from the rules below.</span>
+                        </span>
+                    </label>
+
+                    <label class="flex items-start gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm">
+                        <input type="checkbox" wire:model="typeForm.has_invert" class="mt-0.5 size-4">
+                        <span>
+                            <span class="font-semibold text-slate-800">Pit invert</span>
+                            <span class="mt-0.5 block text-xs text-slate-500">Halfway pit break, then invert. Turn this on for Feature. Invert on Results when the live board is up; hard charger counts both halves.</span>
                         </span>
                     </label>
 

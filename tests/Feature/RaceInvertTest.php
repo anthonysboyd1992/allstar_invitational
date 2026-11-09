@@ -72,6 +72,56 @@ class RaceInvertTest extends TestCase
         $this->assertSame(['1', '2'], $this->restartNumbers($race->refresh()->load('entries.competitor')));
     }
 
+    public function test_live_charge_uses_original_starts_before_invert(): void
+    {
+        $drivers = $this->drivers(4);
+        $race = $this->featureWith($drivers);
+        $feed = $this->liveFeed($drivers->reverse()->values(), 'SCOREBOARD');
+
+        $stats = (new TimingFeedStats)->summarize($feed, $feed->orderedStandings());
+        $rows = (new TimingFeedStats)->withLineupStats($feed->orderedStandings(), $race);
+
+        $this->assertTrue($stats['matched']);
+        $this->assertSame($race->id, (new TimingFeedStats)->matchedRace($feed)->id);
+        $this->assertSame('#4 Driver 4', $stats['hard_charger']['label']);
+        $this->assertSame(3, $stats['hard_charger']['gain']);
+        $this->assertSame('+3', $rows->first()['formatted_charge']);
+    }
+
+    public function test_scoreboard_prefers_the_heat_on_track_over_a_larger_feature_lineup(): void
+    {
+        $heatDrivers = $this->drivers(4);
+        $heatType = RaceType::factory()->create(['name' => 'Heat', 'has_results' => true]);
+        $heat = Race::factory()->for($heatType)->create(['name' => 'Heat 1']);
+        $heat->syncLineup($heatDrivers->pluck('id')->all());
+        $this->featureWith($heatDrivers->concat($this->drivers(4, 5)));
+        $feed = $this->liveFeed($heatDrivers->reverse()->values(), 'SCOREBOARD');
+
+        $matched = (new TimingFeedStats)->matchedRace($feed);
+
+        $this->assertNotNull($matched);
+        $this->assertSame($heat->id, $matched->id);
+    }
+
+    public function test_scoreboard_uses_feature_starts_when_heats_are_already_scored(): void
+    {
+        $heatDrivers = $this->drivers(4);
+        $heatType = RaceType::factory()->create(['name' => 'Heat', 'has_results' => true]);
+        $heat = Race::factory()->for($heatType)->create(['name' => 'Heat 1']);
+        $heat->syncLineup($heatDrivers->pluck('id')->all());
+        $heat->entries()->orderBy('start_position')->get()->each(
+            fn ($entry, int $index) => $entry->update(['finish_position' => $index + 1])
+        );
+        $extras = $this->drivers(4, 5);
+        $feature = $this->featureWith($heatDrivers->concat($extras));
+        $feed = $this->liveFeed($heatDrivers->concat($extras)->reverse()->values(), 'SCOREBOARD');
+
+        $matched = (new TimingFeedStats)->matchedRace($feed);
+
+        $this->assertNotNull($matched);
+        $this->assertSame($feature->id, $matched->id);
+    }
+
     public function test_undo_invert_clears_restart_spots_and_keeps_original_starts(): void
     {
         $drivers = $this->drivers(3);
@@ -161,12 +211,28 @@ class RaceInvertTest extends TestCase
         $this->assertFalse($race->fresh()->isInverted());
     }
 
+    public function test_invert_stays_off_heats_until_the_race_type_allows_it(): void
+    {
+        $this->actingAs(User::factory()->create());
+        $drivers = $this->drivers(2);
+        $type = RaceType::factory()->create(['name' => 'Heat', 'has_results' => true, 'has_invert' => false]);
+        $race = Race::factory()->for($type)->create(['name' => 'Heat 1']);
+        $race->syncLineup($drivers->pluck('id')->all());
+        $this->liveFeed($drivers->reverse()->values(), 'SCOREBOARD');
+
+        Livewire::test('pages::results')
+            ->assertDontSee('>Invert</button>', false)
+            ->call('openInvert', $race->id)
+            ->assertDispatched('notify', message: 'Turn on Pit invert for Heat on Lineups.', type: 'error')
+            ->assertDontSee('Confirm invert');
+    }
+
     /**
      * @param  Collection<int, Competitor>  $drivers
      */
     private function featureWith(Collection $drivers): Race
     {
-        $type = RaceType::factory()->create(['name' => 'Feature', 'has_results' => true]);
+        $type = RaceType::factory()->create(['name' => 'Feature', 'has_results' => true, 'has_invert' => true]);
         $race = Race::factory()->for($type)->create(['name' => 'Feature']);
         $race->syncLineup($drivers->pluck('id')->all());
 

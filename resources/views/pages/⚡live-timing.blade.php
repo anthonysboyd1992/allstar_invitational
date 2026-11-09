@@ -41,7 +41,7 @@ new #[Title('Live Timing')] class extends Component
             return;
         }
 
-        $standings = (new TimingFeedStats)->withIntervals($this->standingsFor($session));
+        $standings = (new TimingFeedStats)->withBoardStats($session, $this->standingsFor($session));
 
         $this->board = array_merge([
             'id' => $session->id,
@@ -208,7 +208,7 @@ new #[Title('Live Timing')] class extends Component
                     @if ($board['hard_charger'] ?? null)
                         <div>
                             <p class="text-[10px] font-semibold tracking-[0.18em] text-zinc-500 uppercase">Hard charger</p>
-                            <p class="mt-1 text-sm font-medium">{{ $board['hard_charger']['label'] }} <span class="font-mono text-emerald-400">+{{ $board['hard_charger']['gain'] }}</span></p>
+                            <p class="mt-1 text-sm font-medium">{{ $board['hard_charger']['label'] }} <span class="timing-charge-leader inline-flex rounded px-1.5 py-0.5 font-mono">+{{ $board['hard_charger']['gain'] }}</span></p>
                         </div>
                     @endif
                     @if ($board['hard_charger_day'] ?? null)
@@ -240,6 +240,7 @@ new #[Title('Live Timing')] class extends Component
                         <th class="px-5 py-3 text-right sm:px-6">Pos</th>
                         <th class="px-3 py-3">No</th>
                         <th class="px-3 py-3">Driver</th>
+                        <th class="px-3 py-3 text-right">Charge</th>
                         <th class="px-3 py-3 text-right">Laps</th>
                         <th class="px-3 py-3 text-right">Last</th>
                         <th class="px-3 py-3 text-right">Best</th>
@@ -254,6 +255,9 @@ new #[Title('Live Timing')] class extends Component
                             $carNumber = $row['number'] !== '' ? $row['number'] : $row['registration'];
                             $isFastest = ($board['fastest_race']['number'] ?? null) === $carNumber;
                             $isPersonalBest = ($row['last_lap'] ?? '') !== '' && ($row['best_lap'] ?? '') !== '' && $row['last_lap'] === $row['best_lap'];
+                            $charge = (int) ($row['charge'] ?? 0);
+                            $isRaceCharge = (bool) ($row['is_race_charge'] ?? false);
+                            $isDayCharge = $charge > 0 && ! $isRaceCharge && ($board['hard_charger_day']['number'] ?? null) === $carNumber;
                             $next = $board['standings'][$index + 1] ?? null;
                             $cutoff = $board['transfer_after'] ?? null;
                             $showTransfer = $cutoff !== null
@@ -275,6 +279,17 @@ new #[Title('Live Timing')] class extends Component
                                 <span @class(['inline-flex min-w-10 justify-center px-1.5 py-0.5 font-mono text-sm font-bold', 'bg-black text-amber-400' => $isFastest, 'bg-amber-400 text-slate-900' => ! $isFastest])>{{ $carNumber }}</span>
                             </td>
                             <td class="px-3 py-3 font-medium tracking-wide">{{ trim($row['first_name'].' '.$row['last_name']) }}</td>
+                            <td class="px-3 py-3 text-right">
+                                @if (($row['formatted_charge'] ?? '') !== '')
+                                    <span @class([
+                                        'inline-flex justify-center px-1.5 py-0.5 font-mono text-sm font-bold tabular-nums',
+                                        'timing-charge-leader rounded' => $isRaceCharge,
+                                        'rounded bg-sky-400 text-slate-950' => $isDayCharge,
+                                        'text-zinc-700' => $isFastest && ! $isRaceCharge && ! $isDayCharge,
+                                        'text-zinc-500' => ! $isFastest && ! $isRaceCharge && ! $isDayCharge,
+                                    ])>{{ $row['formatted_charge'] }}</span>
+                                @endif
+                            </td>
                             <td @class(['px-3 py-3 text-right font-mono font-semibold tabular-nums', 'text-slate-900' => $isFastest, 'text-amber-400' => ! $isFastest])>
                                 @if ($row['laps'] !== null && ($board['race_laps'] ?? null))
                                     {{ $row['laps'] }}/{{ $board['race_laps'] }}
@@ -294,12 +309,12 @@ new #[Title('Live Timing')] class extends Component
                         </tr>
                         @if ($showTransfer)
                             <tr wire:key="transfer-line-{{ $board['id'] }}-{{ $cutoff }}">
-                                <td colspan="9" class="bg-red-600 py-1.5 text-center text-[10px] font-bold tracking-[0.28em] text-white uppercase">Transfer · Top {{ $cutoff }}</td>
+                                <td colspan="10" class="bg-red-600 py-1.5 text-center text-[10px] font-bold tracking-[0.28em] text-white uppercase">Transfer · Top {{ $cutoff }}</td>
                             </tr>
                         @endif
                     @empty
                         <tr>
-                            <td colspan="9" class="px-6 py-14 text-center text-zinc-500">No cars in this session yet.</td>
+                            <td colspan="10" class="px-6 py-14 text-center text-zinc-500">No cars in this session yet.</td>
                         </tr>
                     @endforelse
                 </tbody>

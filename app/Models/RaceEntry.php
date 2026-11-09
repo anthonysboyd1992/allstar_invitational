@@ -75,17 +75,53 @@ class RaceEntry extends Model
     }
 
     /**
-     * Charge for display, e.g. "+3", "-2", or empty when unchanged.
+     * Positions gained from original start to the pit invert.
+     */
+    public function firstHalfCharge(): ?int
+    {
+        $start = (int) ($this->start_position ?? 0);
+        $break = (int) ($this->break_position ?? 0);
+
+        if ($start < 1 || $break < 1) {
+            return null;
+        }
+
+        return $start - $break;
+    }
+
+    /**
+     * Positions gained from the invert restart to the finish.
+     */
+    public function secondHalfCharge(): ?int
+    {
+        $restart = (int) ($this->invert_start_position ?? 0);
+        $finish = (int) ($this->finish_position ?? 0);
+
+        if ($restart < 1 || $finish < 1) {
+            return null;
+        }
+
+        return $restart - $finish;
+    }
+
+    /**
+     * Charge for display, e.g. "+3", or empty when unchanged or lost positions.
      */
     public function formattedCharge(): string
     {
-        $charge = $this->charge();
+        return $this->formattedDelta($this->charge());
+    }
 
-        if ($charge === null || $charge === 0) {
+    /**
+     * Positive pass count for boards and print sheets.
+     */
+    public function formattedDelta(?int $value): string
+    {
+        if ($value === null || $value <= 0) {
             return '';
         }
 
-        return sprintf('%+d', $charge);
+        return sprintf('%+d', $value);
     }
 
     /**

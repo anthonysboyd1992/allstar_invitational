@@ -318,6 +318,7 @@ class ResultsPageTest extends TestCase
             ->assertOk()
             ->assertSee('>Last</th>', false)
             ->assertSee('>Best</th>', false)
+            ->assertSee('>Charge</th>', false)
             ->assertSee('Gap')
             ->assertSee('Diff')
             ->assertSee('Speed')
@@ -399,6 +400,21 @@ class ResultsPageTest extends TestCase
         $this->assertNull($race->entries()->where('competitor_id', $driver->id)->first()->finish_position);
         $this->assertNull($result->fresh()->applied_at);
         $this->assertSame(TimingStatus::Pending, $race->fresh()->timing_status);
+    }
+
+    public function test_reset_day_passes_stops_counting_earlier_sessions(): void
+    {
+        TimingFeedResult::factory()->create(['name' => 'Heat 1']);
+
+        Livewire::test('pages::results')
+            ->assertSee('Reset day passes')
+            ->call('resetDayPasses')
+            ->assertDispatched('notify', message: 'Day passes reset. Earlier sessions no longer count.');
+
+        $this->assertSame(
+            (string) TimingFeedResult::query()->max('id'),
+            Setting::get(Setting::PassesCountedAfterId),
+        );
     }
 
     public function test_timing_users_cannot_open_results(): void

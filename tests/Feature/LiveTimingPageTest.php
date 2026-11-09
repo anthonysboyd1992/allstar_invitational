@@ -38,6 +38,7 @@ class LiveTimingPageTest extends TestCase
             ->assertSee('Ann First')
             ->assertSee('12')
             ->assertSee('Full screen')
+            ->assertSee('Charge')
             ->assertSee('Gap')
             ->assertSee('Diff')
             ->assertSee('Speed')
@@ -101,7 +102,10 @@ class LiveTimingPageTest extends TestCase
         $type = RaceType::factory()->create(['has_results' => true]);
         $feature = RaceType::factory()->create(['name' => 'Feature', 'has_results' => true]);
         $race = Race::factory()->for($type)->create(['name' => 'Heat 1', 'laps' => 8]);
-        $starters = Competitor::factory()->count(4)->create();
+        $starters = collect(range(1, 4))->map(fn (int $number): Competitor => Competitor::factory()->create([
+            'car_number' => (string) (20 + $number),
+            'transponder' => (string) (20000 + $number),
+        ]));
         $bob = Competitor::factory()->create([
             'car_number' => '7',
             'transponder' => '11111',
@@ -144,10 +148,66 @@ class LiveTimingPageTest extends TestCase
             ->assertSee('22.222 mph')
             ->assertSee('Hard charger')
             ->assertSee('+4')
+            ->assertSee('timing-charge-leader', false)
             ->assertSee('Most passes today')
             ->assertSee('Top 4')
             ->assertSee('Transfer · Top 4')
             ->assertSee('bg-amber-400', false);
+    }
+
+    public function test_page_shows_non_leading_charge_in_grey(): void
+    {
+        $type = RaceType::factory()->create(['has_results' => true]);
+        $race = Race::factory()->for($type)->create(['name' => 'Heat 1']);
+        $ann = Competitor::factory()->create([
+            'car_number' => '31',
+            'transponder' => '31001',
+            'first_name' => 'Ann',
+            'last_name' => 'First',
+        ]);
+        $bob = Competitor::factory()->create([
+            'car_number' => '32',
+            'transponder' => '32001',
+            'first_name' => 'Bob',
+            'last_name' => 'Second',
+        ]);
+        $race->syncLineup([$ann->id, $bob->id]);
+        TimingFeedResult::factory()->live()->create([
+            'name' => 'Heat 1',
+            'standings' => [
+                [
+                    'position' => 1,
+                    'number' => '32',
+                    'transponder' => '32001',
+                    'registration' => '32',
+                    'laps' => 3,
+                    'total_time' => '00:01:00.000',
+                    'first_name' => 'Bob',
+                    'last_name' => 'Second',
+                    'last_lap' => '16.400',
+                    'best_lap' => '16.200',
+                ],
+                [
+                    'position' => 2,
+                    'number' => '31',
+                    'transponder' => '31001',
+                    'registration' => '31',
+                    'laps' => 3,
+                    'total_time' => '00:01:01.000',
+                    'first_name' => 'Ann',
+                    'last_name' => 'First',
+                    'last_lap' => '16.800',
+                    'best_lap' => '16.500',
+                ],
+            ],
+        ]);
+
+        $this->get(route('live-timing'))
+            ->assertOk()
+            ->assertSee('+1')
+            ->assertSee('-1')
+            ->assertSee('timing-charge-leader', false)
+            ->assertSee('text-zinc-500', false);
     }
 
     public function test_page_deletes_a_session_and_shows_the_next_one(): void
@@ -274,6 +334,7 @@ class LiveTimingPageTest extends TestCase
 
         $this->get(route('live-timing'))
             ->assertOk()
+            ->assertSee('Charge')
             ->assertSee('Gap')
             ->assertSee('Diff')
             ->assertSee('Speed')

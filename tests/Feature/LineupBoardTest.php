@@ -123,6 +123,7 @@ class LineupBoardTest extends TestCase
 
         $heat->refresh();
         $this->assertTrue($heat->has_results);
+        $this->assertFalse($heat->has_invert);
 
         $rule = $heat->transferRules()->sole();
         $this->assertSame(1, $rule->position_from);
@@ -130,6 +131,20 @@ class LineupBoardTest extends TestCase
         $this->assertSame($dash->id, $rule->destination_race_type_id);
         $this->assertSame(RaceTypeTransferRule::DistributeStagger, $rule->distribute);
         $this->assertSame(6, $rule->destination_start_slot);
+    }
+
+    public function test_editing_a_race_type_saves_pit_invert(): void
+    {
+        $feature = RaceType::factory()->create(['name' => 'Feature', 'has_results' => true, 'has_invert' => false]);
+
+        Livewire::test('pages::lineups')
+            ->call('openRaceTypeEditor', $feature->id)
+            ->assertSet('typeForm.has_invert', false)
+            ->set('typeForm.has_invert', true)
+            ->call('saveRaceType')
+            ->assertHasNoErrors();
+
+        $this->assertTrue($feature->refresh()->has_invert);
     }
 
     public function test_adding_a_race_type_creates_numbered_races(): void

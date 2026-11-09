@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\TimingFeedStats;
 use App\TimingStatus;
 use Database\Factories\RaceFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -502,6 +503,102 @@ class Race extends Model
             'show_transfer' => true,
             'columns' => 8,
         ]]);
+    }
+
+    /**
+     * Drivers ranked by hard-charger gain, with first- and second-half passes after an invert.
+     *
+     * @return Collection<int, array{title: string, slots: Collection<int, array{rank: int, entry: RaceEntry}>, race: Race, inverted: bool, columns: int}>
+     */
+    public function printedHardChargerBlocks(): Collection
+    {
+        $this->loadMissing(['entries.competitor']);
+        $inverted = $this->isInverted();
+        $slots = $this->entries
+            ->filter(fn (RaceEntry $entry): bool => $entry->finish_position !== null)
+            ->sort(function (RaceEntry $left, RaceEntry $right): int {
+                $charge = ($right->charge() ?? PHP_INT_MIN) <=> ($left->charge() ?? PHP_INT_MIN);
+
+                if ($charge !== 0) {
+                    return $charge;
+                }
+
+                return ((int) $left->finish_position) <=> ((int) $right->finish_position);
+            })
+            ->values()
+            ->map(fn (RaceEntry $entry, int $index): array => [
+                'rank' => $index + 1,
+                'entry' => $entry,
+            ]);
+
+        $title = $this->printedTitle();
+        $invertLabel = $this->printedInvertLabel();
+
+        if ($invertLabel !== null) {
+            $title .= ' · '.$invertLabel;
+        }
+
+        return collect([[
+            'title' => $title,
+            'slots' => $slots,
+            'race' => $this,
+            'inverted' => $inverted,
+            'columns' => $inverted ? 10 : 6,
+        ]]);
+    }
+
+    /**
+     * Drivers ranked by this race's best lap, with their fastest lap of the day.
+     *
+     * @param  Collection<int, TimingFeedResult>  $sessions
+     * @return Collection<int, array{title: string, slots: Collection<int, array{rank: int, entry: RaceEntry, best_race: string, best_day: string}>, race: Race, columns: int}>
+     */
+    public function printedBestTimesBlocks(Collection $sessions): Collection
+    {
+        $this->loadMissing(['entries.competitor']);
+        $stats = new TimingFeedStats;
+        $laps = $stats->bestLapsForRace($this, $sessions);
+        $slots = $this->entries
+            ->filter(fn (RaceEntry $entry): bool => $entry->competitor !== null)
+            ->sort(function (RaceEntry $left, RaceEntry $right) use ($laps, $stats): int {
+                $race = ($stats->lapMs($laps[$left->id]['race'] ?? '') ?? PHP_INT_MAX)
+                    <=> ($stats->lapMs($laps[$right->id]['race'] ?? '') ?? PHP_INT_MAX);
+
+                if ($race !== 0) {
+                    return $race;
+                }
+
+                return ($stats->lapMs($laps[$left->id]['day'] ?? '') ?? PHP_INT_MAX)
+                    <=> ($stats->lapMs($laps[$right->id]['day'] ?? '') ?? PHP_INT_MAX);
+            })
+            ->values()
+            ->map(fn (RaceEntry $entry, int $index): array => [
+                'rank' => $index + 1,
+                'entry' => $entry,
+                'best_race' => $laps[$entry->id]['race'] ?? '',
+                'best_day' => $laps[$entry->id]['day'] ?? '',
+            ]);
+
+        return collect([[
+            'title' => $this->printedTitle(),
+            'slots' => $slots,
+            'race' => $this,
+            'columns' => 5,
+        ]]);
+    }
+
+    /**
+     * Invert depth for print headings, e.g. "Top 8 invert".
+     */
+    public function printedInvertLabel(): ?string
+    {
+        if (! $this->isInverted()) {
+            return null;
+        }
+
+        return $this->invert_count === 0
+            ? 'Full field invert'
+            : 'Top '.$this->invert_count.' invert';
     }
 
     /**

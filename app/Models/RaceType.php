@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Collection;
 
-#[Fillable(['name', 'race_name', 'sort_order', 'cars_per_race', 'cars_allowed', 'combines_groups', 'assigns_by_pill', 'has_results'])]
+#[Fillable(['name', 'race_name', 'sort_order', 'cars_per_race', 'cars_allowed', 'combines_groups', 'assigns_by_pill', 'has_results', 'has_invert'])]
 class RaceType extends Model
 {
     /** @use HasFactory<RaceTypeFactory> */
@@ -407,6 +407,7 @@ class RaceType extends Model
             'combines_groups' => 'boolean',
             'assigns_by_pill' => 'boolean',
             'has_results' => 'boolean',
+            'has_invert' => 'boolean',
         ];
     }
 }

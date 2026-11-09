@@ -49,7 +49,6 @@
             .accolades { width: 36%; }
             .kart, .charge { text-align: center; font-weight: 700; }
             .charge-up { color: #15803d; }
-            .charge-down { color: #b91c1c; }
             .empty { padding: 10px 6px; color: #64748b; }
             @page { size: letter landscape; margin: 0.5in; }
             @media print {
@@ -69,7 +68,7 @@
                     -webkit-print-color-adjust: exact;
                     print-color-adjust: exact;
                 }
-                .charge-up, .charge-down {
+                .charge-up {
                     -webkit-print-color-adjust: exact;
                     print-color-adjust: exact;
                 }
@@ -119,7 +118,7 @@
                                     <td class="transfer">{{ $slot['transfer'] }}</td>
                                 @endif
                                 <td class="kart">{{ $slot['entry'] ? $block['race']->kartAssignment($slot['entry']) : '' }}</td>
-                                <td @class(['charge', 'charge-up' => $slot['entry']?->charge() > 0, 'charge-down' => $slot['entry']?->charge() < 0])>{{ $slot['entry']?->formattedCharge() }}</td>
+                                <td @class(['charge', 'charge-up' => $slot['entry']?->charge() > 0])>{{ $slot['entry']?->formattedCharge() }}</td>
                             </tr>
                         @empty
                             <tr>
