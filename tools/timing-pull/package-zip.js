@@ -5,7 +5,7 @@ const path = require('node:path');
 
 const exeName = 'Allstar Invitational Race Manager Puller.exe';
 const distDir = path.join(__dirname, 'dist');
-const dest = path.resolve(__dirname, '../../storage/app/private/timing-puller.zip');
+const dest = path.resolve(__dirname, '../../public/downloads/allstar-invitational-race-manager-puller.zip');
 
 const exe = fs.readdirSync(distDir).find((name) => name.endsWith('.exe') && !name.toLowerCase().includes('setup'));
 

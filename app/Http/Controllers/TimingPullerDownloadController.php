@@ -8,12 +8,14 @@ class TimingPullerDownloadController extends Controller
 {
     public const DownloadName = 'Allstar Invitational Race Manager Puller.zip';
 
+    public const PublicPath = 'downloads/allstar-invitational-race-manager-puller.zip';
+
     /**
-     * Windows puller zip built by tools/timing-pull (`npm run dist`).
+     * Windows puller zip built locally by tools/timing-pull (`npm run dist`).
      */
     public static function zipPath(): string
     {
-        return storage_path('app/private/timing-puller.zip');
+        return public_path(self::PublicPath);
     }
 
     public function __invoke(): BinaryFileResponse
