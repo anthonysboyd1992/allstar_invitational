@@ -11,7 +11,7 @@
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     </head>
     <body class="flex h-full flex-col overflow-hidden font-sans text-slate-900 antialiased">
-        <header class="z-30 shrink-0 bg-slate-900 text-white shadow">
+        <header class="app-shell-header z-30 shrink-0 bg-slate-900 text-white shadow">
             <div class="flex h-14 items-center gap-6 px-4">
                 <a href="{{ route('home') }}" class="text-lg font-black uppercase tracking-wide">
                     Allstar <span class="text-amber-400">Invitational</span>
@@ -29,6 +29,45 @@
                                 'text-slate-300 hover:bg-slate-800 hover:text-white' => ! request()->routeIs($routeName),
                             ])
                         >{{ $label }}</a>
+                        @if (
+                            ($routeName === 'competitors' && auth()->user()?->can('access-pill-draw'))
+                            || ($routeName === 'lineups' && ! auth()->user()?->canAccessArea('competitors') && auth()->user()?->can('access-pill-draw'))
+                        )
+                            <a
+                                href="{{ route('pill-draw') }}"
+                                wire:navigate
+                                @class([
+                                    'rounded-md px-3 py-1.5 transition',
+                                    'bg-amber-400 text-slate-900' => request()->routeIs('pill-draw'),
+                                    'text-slate-300 hover:bg-slate-800 hover:text-white' => ! request()->routeIs('pill-draw'),
+                                ])
+                            >Pill Draw</a>
+                        @endif
+                        @if ($routeName === 'lineups')
+                            <a
+                                href="{{ route('lineup-board') }}"
+                                wire:navigate
+                                @class([
+                                    'rounded-md px-3 py-1.5 transition',
+                                    'bg-amber-400 text-slate-900' => request()->routeIs('lineup-board'),
+                                    'text-slate-300 hover:bg-slate-800 hover:text-white' => ! request()->routeIs('lineup-board'),
+                                ])
+                            >Lineup Board</a>
+                        @endif
+                        @if (
+                            ($routeName === 'competitors' && auth()->user()?->can('access-tv'))
+                            || ($routeName === 'lineups' && ! auth()->user()?->canAccessArea('competitors') && auth()->user()?->can('access-tv'))
+                        )
+                            <a
+                                href="{{ route('tv') }}"
+                                wire:navigate
+                                @class([
+                                    'rounded-md px-3 py-1.5 transition',
+                                    'bg-amber-400 text-slate-900' => request()->routeIs('tv'),
+                                    'text-slate-300 hover:bg-slate-800 hover:text-white' => ! request()->routeIs('tv'),
+                                ])
+                            >TV</a>
+                        @endif
                         @if ($routeName === 'timing' || ($routeName === 'results' && ! auth()->user()?->canAccessArea('timing')))
                             <a
                                 href="{{ route('live-timing') }}"

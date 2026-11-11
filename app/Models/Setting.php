@@ -63,6 +63,20 @@ class Setting extends Model
      */
     public const TimingFeedToken = 'timing_feed_token';
 
+    /**
+     * Comma-separated race ids shown on the Lineup TV board.
+     */
+    public const LineupBoardRaces = 'lineup_board_race_ids';
+
+    /**
+     * Which board the shared /tv screen should show.
+     */
+    public const TvBoardMode = 'tv_board_mode';
+
+    public const TvBoardPillDraw = 'pill-draw';
+
+    public const TvBoardLineup = 'lineup-board';
+
     public const LetterheadDirectory = 'letterhead';
 
     /**
@@ -94,6 +108,71 @@ class Setting extends Model
         $id = static::get(self::ActiveRace);
 
         return $id ? Race::query()->with(['raceType', 'entries.competitor', 'entries.car'])->find($id) : null;
+    }
+
+    /**
+     * Race ids currently pushed to the Lineup TV board.
+     *
+     * @return list<int>
+     */
+    public static function lineupBoardRaceIds(): array
+    {
+        $raw = trim((string) static::get(self::LineupBoardRaces, ''));
+
+        if ($raw === '') {
+            return [];
+        }
+
+        return collect(explode(',', $raw))
+            ->map(fn (string $id): int => (int) trim($id))
+            ->filter(fn (int $id): bool => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  list<int|string>  $raceIds
+     */
+    public static function putLineupBoardRaceIds(array $raceIds): void
+    {
+        $ids = collect($raceIds)
+            ->map(fn ($id): int => (int) $id)
+            ->filter(fn (int $id): bool => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        static::put(self::LineupBoardRaces, $ids === [] ? null : implode(',', $ids));
+    }
+
+    /**
+     * Active shared TV board mode.
+     */
+    public static function tvBoardMode(): string
+    {
+        $mode = (string) static::get(self::TvBoardMode, self::TvBoardPillDraw);
+
+        return in_array($mode, [self::TvBoardPillDraw, self::TvBoardLineup], true)
+            ? $mode
+            : self::TvBoardPillDraw;
+    }
+
+    public static function putTvBoardMode(string $mode): void
+    {
+        static::put(
+            self::TvBoardMode,
+            in_array($mode, [self::TvBoardPillDraw, self::TvBoardLineup], true)
+                ? $mode
+                : self::TvBoardPillDraw,
+        );
+    }
+
+    public static function tvBoardModeLabel(?string $mode = null): string
+    {
+        return ($mode ?? static::tvBoardMode()) === self::TvBoardLineup
+            ? 'Lineup Board'
+            : 'Pill Draw';
     }
 
     /**

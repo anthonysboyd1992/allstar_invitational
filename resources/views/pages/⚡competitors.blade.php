@@ -558,6 +558,11 @@ new #[Title('Competitors')] class extends Component
 
             <span class="text-sm text-slate-500">{{ $this->competitors->count() }} competitors</span>
             <a
+                href="{{ route('pill-draw') }}"
+                target="_blank"
+                class="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-800"
+            >Pill Draw TV</a>
+            <a
                 href="{{ route('competitors.print', ['sort' => $sortBy]) }}"
                 target="_blank"
                 class="rounded-md bg-white px-3 py-1.5 text-sm font-semibold ring-1 ring-slate-300 hover:bg-slate-50"

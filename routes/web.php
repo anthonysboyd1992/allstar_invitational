@@ -23,10 +23,13 @@ Route::middleware('auth')->group(function () {
         Route::get('/competitors/print', EntryListPrintController::class)->name('competitors.print');
         Route::get('/competitors/print/announcer', EntryListPrintController::class)->name('competitors.print-announcer');
     });
+    Route::livewire('/pill-draw', 'pages::pill-draw')->middleware('can:access-pill-draw')->name('pill-draw');
+    Route::livewire('/tv', 'pages::tv')->middleware('can:access-tv')->name('tv');
     Route::livewire('/cars', 'pages::cars')->middleware('can:access-cars')->name('cars');
     Route::middleware('can:access-lineups')->group(function () {
         Route::livewire('/lineups', 'pages::lineups')->name('lineups');
         Route::get('/lineups/print', LineupPrintController::class)->name('lineups.print');
+        Route::livewire('/lineup-board', 'pages::lineup-board')->name('lineup-board');
     });
     Route::middleware('can:access-results')->group(function () {
         Route::livewire('/results', 'pages::results')->name('results');

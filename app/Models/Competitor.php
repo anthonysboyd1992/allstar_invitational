@@ -112,6 +112,28 @@ class Competitor extends Model
     }
 
     /**
+     * Round-robin deal: first driver to bucket 0, second to bucket 1, wrapping through every bucket.
+     *
+     * @param  Collection<int, Competitor>  $competitors  already ordered (usually by pill)
+     * @return Collection<int, Collection<int, Competitor>>
+     */
+    public static function dealAcrossBuckets(Collection $competitors, int $bucketCount): Collection
+    {
+        if ($bucketCount < 1) {
+            return collect();
+        }
+
+        $buckets = collect(range(0, $bucketCount - 1))
+            ->map(fn (): Collection => collect());
+
+        foreach ($competitors->values() as $index => $driver) {
+            $buckets[$index % $bucketCount]->push($driver);
+        }
+
+        return $buckets;
+    }
+
+    /**
      * @return HasMany<RaceEntry, $this>
      */
     public function entries(): HasMany

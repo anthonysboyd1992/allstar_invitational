@@ -1157,6 +1157,12 @@ new #[Title('Races & Lineups')] class extends Component
             </form>
             @if ($this->raceTypes->isNotEmpty())
                 <button type="button" wire:click="openPrintPicker" class="rounded-md bg-white px-3 py-1.5 text-sm font-semibold ring-1 ring-slate-300 hover:bg-slate-50">Print</button>
+                <a
+                    href="{{ route('lineup-board') }}"
+                    wire:navigate
+                    class="rounded-md bg-white px-3 py-1.5 text-sm font-semibold ring-1 ring-slate-300 hover:bg-slate-50"
+                    title="Fullscreen TV board for official lineups"
+                >TV board</a>
             @endif
             @error('newTypeName') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
             @error('newTypeRaceName') <span class="text-xs text-red-600">{{ $message }}</span> @enderror
@@ -1238,6 +1244,12 @@ new #[Title('Races & Lineups')] class extends Component
                         title="Lowest pill to the first race, next pill to the next race, wrapping through every group."
                         class="rounded-md bg-slate-900 px-2.5 py-1 text-xs font-black text-white hover:bg-slate-800"
                     >Assign by pill</button>
+                    <a
+                        href="{{ route('pill-draw') }}"
+                        target="_blank"
+                        title="Live TV preview of tentative heats from the pill draw. Does not change these lineups."
+                        class="rounded-md bg-white px-2.5 py-1 text-xs font-bold text-slate-700 ring-1 ring-slate-300 hover:bg-slate-50"
+                    >TV preview</a>
                     <button
                         type="button"
                         wire:click="toggleCombineGroups({{ $raceType->id }})"

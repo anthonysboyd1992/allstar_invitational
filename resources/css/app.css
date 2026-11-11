@@ -28,7 +28,7 @@ html.timing-fullscreen body {
     background-color: #09090b;
 }
 
-html.timing-fullscreen header {
+html.timing-fullscreen .app-shell-header {
     display: none;
 }
 
@@ -59,4 +59,390 @@ html.timing-fullscreen .timing-tower-table {
 .timing-charge-leader {
     background-color: #d946ef;
     color: #fff;
+}
+
+.tv-heat {
+    overflow: hidden;
+    border-radius: 0.85rem;
+    background:
+        linear-gradient(180deg, rgba(24, 24, 27, 0.95) 0%, rgba(9, 9, 11, 0.98) 100%);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.tv-heat__header {
+    position: relative;
+    z-index: 1;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    background: #000;
+    padding: 0.85rem 0.75rem 0.7rem;
+    text-align: center;
+}
+
+.tv-heat__title {
+    display: block;
+    max-width: 100%;
+    color: #fbbf24;
+    font-size: clamp(0.85rem, 1.1vw, 1.15rem);
+    font-weight: 900;
+    line-height: 1.2;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    overflow-wrap: break-word;
+    word-break: break-word;
+}
+
+.tv-heat__count {
+    margin-top: 0.3rem;
+    color: #71717a;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+}
+
+.tv-heat__lanes {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    color: #a1a1aa;
+    font-size: 0.65rem;
+    font-weight: 800;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+}
+
+.tv-heat__lanes span {
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.04);
+    padding: 0.3rem 0.4rem;
+}
+
+.tv-heat__grid {
+    display: grid;
+    align-content: start;
+    gap: 0.5rem;
+    padding: 0.65rem;
+}
+
+.tv-heat__grid--lanes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tv-heat__grid--stack {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.tv-heat__empty {
+    padding: 2.5rem 0.75rem;
+    color: #52525b;
+    text-align: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.tv-driver-tile {
+    min-width: 0;
+}
+
+.tv-driver-tile--filled {
+    background: rgba(9, 9, 11, 0.92);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.tv-driver-tile--empty {
+    background: rgba(24, 24, 27, 0.45);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.tv-driver-tile--inside {
+    border-left: 3px solid #fbbf24;
+}
+
+.tv-driver-tile--outside {
+    border-left: 3px solid #60a5fa;
+}
+
+.tv-driver-tile--stack {
+    border-left: 3px solid #fbbf24;
+}
+
+.tv-driver-tile__pos {
+    color: #71717a;
+    min-width: 1rem;
+}
+
+.tv-driver-tile__car {
+    background: #fbbf24;
+    color: #09090b;
+}
+
+.tv-driver-tile--outside .tv-driver-tile__car {
+    background: #60a5fa;
+    color: #09090b;
+}
+
+.tv-driver-tile__name {
+    color: #f4f4f5;
+}
+
+.tv-driver-tile__meta {
+    color: rgba(251, 191, 36, 0.75);
+}
+
+.tv-driver-tile--outside .tv-driver-tile__meta {
+    color: rgba(96, 165, 250, 0.8);
+}
+
+.tv-driver-tile__kart {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 0.35rem;
+    background: #fbbf24;
+    padding: 0.15rem 0.4rem;
+    color: #09090b;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.7rem;
+    font-weight: 900;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.tv-driver-tile__empty-label {
+    color: #52525b;
+}
+
+.pill-draw-undrawn-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: min-content;
+}
+
+.pill-draw-row,
+.pill-draw-undrawn-row,
+.pill-draw-empty {
+    animation: pill-draw-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.pill-draw-row--awaiting {
+    opacity: 0;
+    transform: scale(0.96);
+}
+
+.pill-draw-row--landed {
+    animation: pill-draw-land 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.pill-draw-heat--catching {
+    box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.45), 0 0 28px rgba(251, 191, 36, 0.12);
+}
+
+.pill-draw-heat--landed {
+    animation: pill-draw-heat-flash 700ms ease-out both;
+}
+
+.pill-draw-flyer {
+    position: fixed;
+    z-index: 80;
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.55rem 0.75rem;
+    border-radius: 0.6rem;
+    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 55%, #ea580c 100%);
+    color: #0a0a0a;
+    pointer-events: none;
+    will-change: transform;
+    box-shadow: 0 18px 40px rgba(251, 191, 36, 0.35);
+}
+
+.pill-draw-flyer-pill {
+    display: inline-flex;
+    min-width: 2.4rem;
+    height: 2.4rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.45rem;
+    background: #09090b;
+    color: #fbbf24;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 1rem;
+    font-weight: 900;
+}
+
+.pill-draw-flyer-copy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.pill-draw-flyer-car {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.75rem;
+    font-weight: 700;
+    opacity: 0.8;
+}
+
+.pill-draw-flyer-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.95rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+}
+
+@keyframes pill-draw-in {
+    from {
+        opacity: 0;
+        transform: translateY(10px) scale(0.98);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes pill-draw-land {
+    0% {
+        opacity: 0;
+        transform: scale(0.9);
+        box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.55);
+    }
+
+    45% {
+        opacity: 1;
+        transform: scale(1.04);
+        box-shadow: 0 0 0 10px rgba(251, 191, 36, 0);
+    }
+
+    100% {
+        opacity: 1;
+        transform: scale(1);
+        box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
+    }
+}
+
+@keyframes pill-draw-heat-flash {
+    0% {
+        background-color: rgb(39 39 42);
+    }
+
+    35% {
+        background-color: rgb(63 48 12);
+    }
+
+    100% {
+        background-color: rgb(39 39 42);
+    }
+}
+
+html.timing-fullscreen .pill-draw-page {
+    max-width: none;
+    padding: 0;
+}
+
+html.timing-fullscreen .pill-draw-board {
+    min-height: 100dvh;
+}
+
+html.timing-fullscreen .pill-draw-board .timing-tower-table {
+    overflow: hidden;
+}
+
+html.timing-fullscreen .pill-draw-header h1 {
+    font-size: 1.75rem;
+}
+
+html.timing-fullscreen .pill-draw-header p {
+    font-size: 0.8rem;
+}
+
+html.timing-fullscreen .pill-draw-heats,
+html.timing-fullscreen .lineup-board-heats {
+    padding: 1rem 1.25rem;
+}
+
+html.timing-fullscreen .pill-draw-grid,
+html.timing-fullscreen .lineup-board-grid {
+    gap: 1rem;
+}
+
+html.timing-fullscreen .tv-heat__header {
+    display: block;
+    padding: 1rem 0.9rem 0.85rem;
+}
+
+html.timing-fullscreen .tv-heat__title {
+    font-size: clamp(1.05rem, 1.4vw, 1.5rem);
+}
+
+html.timing-fullscreen .tv-heat__lanes {
+    font-size: 0.72rem;
+}
+
+html.timing-fullscreen .tv-heat__grid {
+    gap: 0.65rem;
+    padding: 0.85rem;
+}
+
+html.timing-fullscreen .tv-driver-tile {
+    min-height: 5rem;
+    padding: 0.75rem;
+}
+
+html.timing-fullscreen .tv-driver-tile__car {
+    min-width: 2.75rem;
+    font-size: 1.05rem;
+}
+
+html.timing-fullscreen .tv-driver-tile__name {
+    font-size: 1.05rem;
+    line-height: 1.25;
+}
+
+html.timing-fullscreen .tv-driver-tile__meta {
+    font-size: 0.7rem;
+}
+
+html.timing-fullscreen .pill-draw-undrawn {
+    width: 22rem;
+}
+
+html.timing-fullscreen .pill-draw-undrawn h3 {
+    font-size: 1.1rem;
+}
+
+html.timing-fullscreen .pill-draw-undrawn-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.35rem;
+    padding: 0.65rem;
+}
+
+html.timing-fullscreen .pill-draw-undrawn-row {
+    padding: 0.35rem 0.45rem;
+}
+
+html.timing-fullscreen .pill-draw-undrawn-row p:first-child {
+    font-size: 0.82rem;
+}
+
+html.timing-fullscreen .lineup-board-page {
+    max-width: none;
+    padding: 0;
+}
+
+html.timing-fullscreen .lineup-board {
+    min-height: 100dvh;
+}
+
+html.timing-fullscreen .lineup-board .timing-tower-table {
+    overflow: hidden;
+}
+
+html.timing-fullscreen .lineup-board-header h1 {
+    font-size: 1.75rem;
 }

@@ -26,5 +26,7 @@ class AppServiceProvider extends ServiceProvider
         }
 
         Gate::define('access-live-timing', fn (User $user): bool => $user->canAccessArea('timing') || $user->canAccessArea('results'));
+        Gate::define('access-pill-draw', fn (User $user): bool => $user->canAccessArea('competitors') || $user->canAccessArea('lineups'));
+        Gate::define('access-tv', fn (User $user): bool => $user->can('access-pill-draw'));
     }
 }

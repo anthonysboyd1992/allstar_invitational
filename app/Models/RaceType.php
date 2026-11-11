@@ -291,16 +291,11 @@ class RaceType extends Model
         $this->unsetRelation('races');
         $this->load(['cars', 'races']);
         $races = $this->racesInProgramOrder();
-
-        $buckets = array_fill(0, $races->count(), []);
-
-        foreach ($drivers as $index => $driver) {
-            $buckets[$index % $races->count()][] = $driver;
-        }
+        $buckets = Competitor::dealAcrossBuckets($drivers, $races->count());
 
         foreach ($races as $index => $race) {
             $race->setRelation('raceType', $this);
-            $race->syncLineup(collect($buckets[$index])->pluck('id')->all());
+            $race->syncLineup($buckets[$index]->pluck('id')->all());
         }
 
         return $races->count();
