@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Competitor;
+use App\Models\Setting;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Validator;
@@ -212,6 +213,8 @@ new #[Title('Competitors')] class extends Component
         $this->manualPill = '';
         $this->drawnPill = null;
         $this->resetValidation();
+        Setting::putPillDrawCompetitorId($this->pillCompetitorId);
+        Setting::putPillDrawPendingPill(null);
     }
 
     public function closePillModal(): void
@@ -220,6 +223,7 @@ new #[Title('Competitors')] class extends Component
         $this->manualPill = '';
         $this->drawnPill = null;
         $this->resetValidation();
+        Setting::putPillDrawCompetitorId(null);
     }
 
     /**
@@ -254,12 +258,13 @@ new #[Title('Competitors')] class extends Component
     }
 
     /**
-     * Lock the drawn pill into the pill field.
+     * Lock the drawn pill into the pill field and push it to the TV after the roll animation.
      */
     public function revealDrawnPill(): void
     {
         if ($this->drawnPill !== null) {
             $this->manualPill = (string) $this->drawnPill;
+            Setting::putPillDrawPendingPill($this->drawnPill);
             $this->resetValidation();
         }
     }

@@ -55,7 +55,7 @@ class LineupTvBoardTest extends TestCase
             ->assertDontSee('Ann First')
             ->call('saveToTv')
             ->assertSee('2 races on TV')
-            ->assertSeeInOrder(['Heat 1', 'Inside', 'Outside', 'Ann First', 'Start 1', 'Heat 2', 'Bob Second', 'Start 1'], false)
+            ->assertSeeInOrder(['HEAT 1', 'Inside', 'Outside', 'Ann First', 'Start 1', 'HEAT 2', 'Bob Second', 'Start 1'], false)
             ->assertSee('11')
             ->assertSee('22')
             ->assertSee('tv-heat__grid--lanes', false);
@@ -179,10 +179,45 @@ class LineupTvBoardTest extends TestCase
         Setting::putLineupBoardRaceIds([$race->id]);
 
         Livewire::test('pages::lineup-board')
-            ->assertSee('Heat 1')
+            ->assertSee('HEAT 1')
             ->assertSee('Ann First')
             ->assertSee('Empty')
             ->assertSee('4 spots');
+    }
+
+    public function test_board_shows_lineup_override_name_and_laps_when_set(): void
+    {
+        $race = Race::factory()->create([
+            'name' => 'Heat 1',
+            'sponsor' => 'ACME',
+            'lineup_name' => 'IMCA Modified Heat 1',
+            'laps' => 20,
+        ]);
+        $driver = Competitor::factory()->create(['first_name' => 'Ann', 'last_name' => 'First']);
+        $race->syncLineup([$driver->id]);
+        Setting::putLineupBoardRaceIds([$race->id]);
+
+        Livewire::test('pages::lineup-board')
+            ->assertSee('IMCA MODIFIED HEAT 1')
+            ->assertDontSee('ACME - HEAT 1')
+            ->assertSee('20 Laps')
+            ->assertSee('Ann First');
+    }
+
+    public function test_board_falls_back_to_sponsor_and_race_name_without_override(): void
+    {
+        $race = Race::factory()->create([
+            'name' => 'Heat 1',
+            'sponsor' => 'ACME',
+            'lineup_name' => null,
+            'laps' => null,
+        ]);
+        Setting::putLineupBoardRaceIds([$race->id]);
+
+        Livewire::test('pages::lineup-board')
+            ->assertSee('ACME - HEAT 1')
+            ->assertDontSee('tv-heat__laps', false)
+            ->assertSee('0 spots');
     }
 
     public function test_board_shows_assigned_invitational_car(): void

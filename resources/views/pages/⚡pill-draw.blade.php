@@ -22,6 +22,7 @@ new #[Title('Pill Draw')] class extends Component
      *     stamp: string,
      *     drawn: int,
      *     complete: bool,
+     *     drawing: ?array{id: int, car: string, name: string, pill: ?int},
      *     heats: list<array{title: string, drivers: list<array{id: int, pill: int, car: string, name: string, fresh: bool}>}>,
      *     undrawn: list<array{id: int, car: string, name: string}>
      * }
@@ -30,6 +31,7 @@ new #[Title('Pill Draw')] class extends Component
         'stamp' => '',
         'drawn' => 0,
         'complete' => false,
+        'drawing' => null,
         'heats' => [],
         'undrawn' => [],
     ];
@@ -62,32 +64,47 @@ new #[Title('Pill Draw')] class extends Component
                 ?: strnatcasecmp((string) $a->car_number, (string) $b->car_number))
             ->values();
 
+        $drawingCompetitor = Setting::pillDrawCompetitor();
+        $pendingPill = Setting::pillDrawPendingPill();
+        $drawing = $drawingCompetitor === null ? null : [
+            'id' => $drawingCompetitor->id,
+            'car' => (string) $drawingCompetitor->car_number,
+            'name' => $drawingCompetitor->full_name,
+            'pill' => $pendingPill,
+        ];
+
         $stamp = $labels->implode('|').'|'.$drawn
             ->sortBy(fn (Competitor $driver): string => sprintf('%06d-%d', (int) $driver->pill_number, $driver->id))
             ->map(fn (Competitor $driver): string => $driver->id.':'.$driver->pill_number)
-            ->implode(',').'|u:'.$undrawn->pluck('id')->implode(',');
+            ->implode(',').'|u:'.$undrawn->pluck('id')->implode(',').'|d:'.($drawing['id'] ?? '').':'.($drawing['pill'] ?? '');
 
         if (($this->board['stamp'] ?? '') === $stamp) {
             return;
         }
 
         $previousUndrawnIds = collect($this->board['undrawn'] ?? [])->pluck('id')->map(fn ($id): int => (int) $id)->all();
-        $previousHeatById = collect($this->board['heats'] ?? [])
-            ->flatMap(fn (array $heat, int $heatIndex): Collection => collect($heat['drivers'])->mapWithKeys(
-                fn (array $driver): array => [(int) $driver['id'] => $heatIndex],
-            ))
-            ->all();
+        $previousPlacementById = [];
+
+        foreach ($this->board['heats'] ?? [] as $heatIndex => $heat) {
+            foreach ($heat['drivers'] as $slot => $driver) {
+                $previousPlacementById[(int) $driver['id']] = [
+                    'heat' => (int) $heatIndex,
+                    'slot' => (int) $slot,
+                ];
+            }
+        }
 
         $buckets = Competitor::dealAcrossBuckets(Competitor::sortByPillNumber($drawn), $labels->count());
         $complete = $competitors->isNotEmpty() && $undrawn->isEmpty();
         $arrivals = [];
 
-        $heats = $labels->map(function (string $title, int $index) use ($buckets, $previousUndrawnIds, $previousHeatById, &$arrivals): array {
-            $drivers = ($buckets[$index] ?? collect())->values()->map(function (Competitor $driver, int $slot) use ($index, $title, $previousUndrawnIds, $previousHeatById, &$arrivals): array {
+        $heats = $labels->map(function (string $title, int $index) use ($buckets, $previousUndrawnIds, $previousPlacementById, &$arrivals): array {
+            $drivers = ($buckets[$index] ?? collect())->values()->map(function (Competitor $driver, int $slot) use ($index, $title, $previousUndrawnIds, $previousPlacementById, &$arrivals): array {
                 $id = $driver->id;
                 $fromUndrawn = in_array($id, $previousUndrawnIds, true);
-                $previousHeat = $previousHeatById[$id] ?? null;
-                $relocated = $previousHeat !== null && $previousHeat !== $index;
+                $previous = $previousPlacementById[$id] ?? null;
+                $relocated = $previous !== null
+                    && ((int) $previous['heat'] !== $index || (int) $previous['slot'] !== $slot);
                 $fresh = $fromUndrawn || $relocated;
 
                 if ($fresh) {
@@ -122,6 +139,7 @@ new #[Title('Pill Draw')] class extends Component
             'stamp' => $stamp,
             'drawn' => $drawn->count(),
             'complete' => $complete,
+            'drawing' => $drawing,
             'heats' => $heats,
             'undrawn' => $undrawn->map(fn (Competitor $driver): array => [
                 'id' => $driver->id,
@@ -186,13 +204,13 @@ new #[Title('Pill Draw')] class extends Component
             <div class="min-w-0 flex-1">
                 @if ($board['complete'])
                     <p class="text-[11px] font-semibold tracking-[0.28em] text-emerald-400 uppercase">Official</p>
-                    <h1 class="truncate text-lg font-semibold tracking-wide uppercase sm:text-xl">Heat race / hotlap groups</h1>
+                    <h1 class="truncate text-lg font-semibold tracking-wide uppercase sm:text-xl">Hotlaps / Heat Race Groups</h1>
                     <p class="mt-0.5 text-[11px] tracking-wide text-zinc-400 uppercase">
                         All cars drawn · {{ $board['drawn'] }} {{ $board['drawn'] === 1 ? 'driver' : 'drivers' }} · these groups are official
                     </p>
                 @else
                     <p class="text-[11px] font-semibold tracking-[0.28em] text-amber-400 uppercase">Projected</p>
-                    <h1 class="truncate text-lg font-semibold tracking-wide uppercase sm:text-xl">Heat race / hotlap groups</h1>
+                    <h1 class="truncate text-lg font-semibold tracking-wide uppercase sm:text-xl">Hotlaps / Heat Race Groups</h1>
                     <p class="mt-0.5 text-[11px] tracking-wide text-zinc-500 uppercase">
                         {{ $board['drawn'] }} drawn · {{ count($board['undrawn']) }} waiting · becomes official when every car has drawn
                     </p>
@@ -208,13 +226,33 @@ new #[Title('Pill Draw')] class extends Component
             </button>
         </div>
 
+        @if ($board['drawing'] !== null)
+            <div class="shrink-0 border-b border-amber-400/30 bg-amber-400/10 px-5 py-3 sm:px-6">
+                <div class="flex flex-wrap items-end justify-between gap-3">
+                    <div class="min-w-0">
+                        <p class="text-[10px] font-semibold tracking-[0.28em] text-amber-400 uppercase">Now drawing</p>
+                        <p class="mt-1 truncate text-xl font-black tracking-wide text-amber-100 uppercase sm:text-2xl">
+                            #{{ filled($board['drawing']['car']) ? $board['drawing']['car'] : '—' }}
+                            {{ $board['drawing']['name'] }}
+                        </p>
+                    </div>
+                    @if ($board['drawing']['pill'] !== null)
+                        <div class="shrink-0 text-right">
+                            <p class="text-[10px] font-semibold tracking-[0.28em] text-amber-400/80 uppercase">Pill</p>
+                            <p class="mt-0.5 font-mono text-4xl font-black leading-none text-amber-300 sm:text-5xl">{{ $board['drawing']['pill'] }}</p>
+                        </div>
+                    @endif
+                </div>
+            </div>
+        @endif
+
         <div class="timing-tower-table pill-draw-body flex min-h-0 flex-1 overflow-hidden">
             <div class="pill-draw-main flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                 @if ($board['drawn'] === 0)
                     <div class="flex flex-1 items-center justify-center px-10 py-16 text-center">
                         <div class="pill-draw-empty">
                             <h2 class="text-2xl font-semibold tracking-tight">Waiting for the first pill</h2>
-                            <p class="mt-4 text-sm text-zinc-400">Projected heat race / hotlap groups update as pills are drawn. Lowest pill lands in Heat 1, then Heat 2, wrapping through every heat.</p>
+                            <p class="mt-4 text-sm text-zinc-400">Projected Hotlaps / Heat Race Groups update as pills are drawn. Lowest pill lands in Heat 1, then Heat 2, wrapping through every heat.</p>
                         </div>
                     </div>
                 @else
@@ -296,7 +334,7 @@ new #[Title('Pill Draw')] class extends Component
                 @if ($board['complete'])
                     <div class="flex flex-1 items-center px-4 py-6">
                         <p class="rounded-md bg-emerald-500/10 px-3 py-3 text-sm font-semibold text-emerald-300 ring-1 ring-emerald-500/20">
-                            Every car has drawn. These heat race / hotlap groups are now official.
+                            Every car has drawn. These Hotlaps / Heat Race Groups are now official.
                         </p>
                     </div>
                 @elseif (count($board['undrawn']) === 0)
@@ -306,15 +344,31 @@ new #[Title('Pill Draw')] class extends Component
                 @else
                     <ol class="pill-draw-undrawn-list grid min-h-0 flex-1 content-start gap-1 overflow-hidden p-2">
                         @foreach ($board['undrawn'] as $index => $driver)
+                            @php($isDrawing = ($board['drawing']['id'] ?? null) === $driver['id'])
                             <li
                                 wire:key="undrawn-{{ $driver['id'] }}"
                                 data-undrawn-id="{{ $driver['id'] }}"
-                                class="pill-draw-undrawn-row min-w-0 rounded bg-zinc-950 px-1.5 py-1 ring-1 ring-white/10"
+                                @class([
+                                    'pill-draw-undrawn-row min-w-0 rounded px-1.5 py-1 ring-1',
+                                    'bg-amber-400/15 ring-amber-400/50' => $isDrawing,
+                                    'bg-zinc-950 ring-white/10' => ! $isDrawing,
+                                ])
                                 style="animation-delay: {{ min($index, 24) * 18 }}ms"
                             >
-                                <p class="text-[11px] font-semibold leading-snug tracking-wide break-words text-zinc-100 sm:text-xs">{{ $driver['name'] }}</p>
-                                <p class="mt-0.5 font-mono text-[10px] leading-tight text-zinc-500">
+                                <p @class([
+                                    'text-[11px] font-semibold leading-snug tracking-wide break-words sm:text-xs',
+                                    'text-amber-100' => $isDrawing,
+                                    'text-zinc-100' => ! $isDrawing,
+                                ])>{{ $driver['name'] }}</p>
+                                <p @class([
+                                    'mt-0.5 font-mono text-[10px] leading-tight',
+                                    'text-amber-300/80' => $isDrawing,
+                                    'text-zinc-500' => ! $isDrawing,
+                                ])>
                                     #{{ filled($driver['car']) ? $driver['car'] : '—' }}
+                                    @if ($isDrawing)
+                                        <span class="ml-1 tracking-wide uppercase">Drawing</span>
+                                    @endif
                                 </p>
                             </li>
                         @endforeach

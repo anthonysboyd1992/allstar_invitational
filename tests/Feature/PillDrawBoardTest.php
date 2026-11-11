@@ -6,6 +6,7 @@ use App\Models\Competitor;
 use App\Models\Race;
 use App\Models\RaceEntry;
 use App\Models\RaceType;
+use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -56,7 +57,7 @@ class PillDrawBoardTest extends TestCase
         $this->get(route('pill-draw'))
             ->assertOk()
             ->assertSee('Projected')
-            ->assertSee('Heat race / hotlap groups')
+            ->assertSee('Hotlaps / Heat Race Groups')
             ->assertSee('6 drawn')
             ->assertSee('becomes official when every car has drawn')
             ->assertSeeInOrder([
@@ -127,7 +128,7 @@ class PillDrawBoardTest extends TestCase
             ->assertOk()
             ->assertSee('Official')
             ->assertSee('these groups are official')
-            ->assertSee('Every car has drawn. These heat race / hotlap groups are now official.');
+            ->assertSee('Every car has drawn. These Hotlaps / Heat Race Groups are now official.');
     }
 
     public function test_board_falls_back_to_five_heats_when_no_heat_type_exists(): void
@@ -161,6 +162,80 @@ class PillDrawBoardTest extends TestCase
 
         $this->assertSame(0, RaceEntry::query()->count());
         $this->assertSame(0, $race->fresh()->entries()->count());
+    }
+
+    public function test_board_shows_the_driver_currently_drawing(): void
+    {
+        $drawing = Competitor::factory()->create([
+            'pill_number' => null,
+            'car_number' => '47',
+            'first_name' => 'Ann',
+            'last_name' => 'First',
+        ]);
+        Competitor::factory()->create([
+            'pill_number' => null,
+            'car_number' => '99',
+            'first_name' => 'Bob',
+            'last_name' => 'Second',
+        ]);
+        Setting::putPillDrawCompetitorId($drawing->id);
+
+        Livewire::test('pages::pill-draw')
+            ->assertSee('Now drawing')
+            ->assertSee('#47')
+            ->assertSee('Ann First')
+            ->assertSee('Drawing')
+            ->assertSee('bg-amber-400/15', false)
+            ->assertDontSee('>Pill</p>', false);
+
+        Setting::putPillDrawPendingPill(33);
+
+        Livewire::test('pages::pill-draw')
+            ->call('refreshBoard')
+            ->assertSee('Now drawing')
+            ->assertSee('>Pill</p>', false)
+            ->assertSee('>33</p>', false);
+
+        Setting::putPillDrawCompetitorId(null);
+
+        Livewire::test('pages::pill-draw')
+            ->call('refreshBoard')
+            ->assertDontSee('Now drawing');
+
+        $this->assertNull(Setting::pillDrawPendingPill());
+    }
+
+    public function test_newly_drawn_and_relocated_drivers_are_marked_fresh_for_fly_animation(): void
+    {
+        $type = RaceType::factory()->create(['name' => 'Heat']);
+        collect(range(1, 2))->each(
+            fn (int $number) => Race::factory()->for($type)->create([
+                'name' => 'Heat '.$number,
+                'sort_order' => $number,
+            ]),
+        );
+        Competitor::factory()->create(['pill_number' => 10, 'first_name' => 'Ann', 'last_name' => 'First']);
+        $second = Competitor::factory()->create(['pill_number' => null, 'first_name' => 'Bob', 'last_name' => 'Second']);
+
+        $board = Livewire::test('pages::pill-draw')
+            ->assertSee('Ann First')
+            ->assertSee('Bob Second');
+
+        $second->update(['pill_number' => 5]);
+        $board->call('refreshBoard');
+
+        $drivers = collect($board->get('board')['heats'])
+            ->flatMap(fn (array $heat, int $heatIndex) => collect($heat['drivers'])->map(
+                fn (array $driver): array => $driver + ['heat' => $heatIndex],
+            ));
+
+        $bob = $drivers->firstWhere('name', 'Bob Second');
+        $ann = $drivers->firstWhere('name', 'Ann First');
+
+        $this->assertTrue($bob['fresh']);
+        $this->assertTrue($ann['fresh']);
+        $this->assertSame(0, $bob['heat']);
+        $this->assertSame(1, $ann['heat']);
     }
 
     public function test_competitors_page_links_to_the_pill_draw_tv(): void

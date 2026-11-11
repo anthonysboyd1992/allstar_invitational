@@ -29,7 +29,7 @@ new #[Title('Lineup Board')] class extends Component
     public string $stamp = '';
 
     /**
-     * @var list<array{id: int, title: string, slots: list<array{position: int, car: ?string, name: ?string}>}>
+     * @var list<array{id: int, title: string, laps: ?int, slots: list<array{position: int, car: ?string, name: ?string, kart: ?string}>}>
      */
     public array $columns = [];
 
@@ -79,7 +79,12 @@ new #[Title('Lineup Board')] class extends Component
                         .(string) ($entry?->car?->number ?? '');
                 })->implode(',');
 
-                return $race->id.'|'.$race->name.'|'.$slots;
+                return $race->id.'|'
+                    .$race->name.'|'
+                    .(string) $race->lineup_name.'|'
+                    .(string) $race->laps.'|'
+                    .(string) $race->sponsor.'|'
+                    .$slots;
             })
             ->implode('||');
 
@@ -90,7 +95,8 @@ new #[Title('Lineup Board')] class extends Component
         $this->stamp = $stamp;
         $this->columns = $races->map(fn (Race $race): array => [
             'id' => $race->id,
-            'title' => $race->name,
+            'title' => $race->printedLineupTitle(),
+            'laps' => filled($race->laps) ? (int) $race->laps : null,
             'slots' => $race->lineupSlots()->map(function (array $slot) use ($race): array {
                 /** @var RaceEntry|null $entry */
                 $entry = $slot['entry'];
@@ -380,6 +386,9 @@ new #[Title('Lineup Board')] class extends Component
                                 >
                                     <header class="tv-heat__header lineup-board-heat-header shrink-0">
                                         <h2 class="tv-heat__title lineup-board-heat-title">{{ $column['title'] }}</h2>
+                                        @if ($column['laps'] !== null)
+                                            <p class="tv-heat__laps">{{ $column['laps'] }} {{ $column['laps'] === 1 ? 'Lap' : 'Laps' }}</p>
+                                        @endif
                                         <p class="tv-heat__count">
                                             {{ count($column['slots']) }} {{ count($column['slots']) === 1 ? 'spot' : 'spots' }}
                                         </p>

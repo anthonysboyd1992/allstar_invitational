@@ -91,6 +91,15 @@ html.timing-fullscreen .timing-tower-table {
     word-break: break-word;
 }
 
+.tv-heat__laps {
+    margin-top: 0.35rem;
+    color: #fbbf24;
+    font-size: clamp(0.8rem, 1.05vw, 1.1rem);
+    font-weight: 900;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
 .tv-heat__count {
     margin-top: 0.3rem;
     color: #71717a;
@@ -378,6 +387,10 @@ html.timing-fullscreen .tv-heat__header {
 
 html.timing-fullscreen .tv-heat__title {
     font-size: clamp(1.05rem, 1.4vw, 1.5rem);
+}
+
+html.timing-fullscreen .tv-heat__laps {
+    font-size: clamp(0.95rem, 1.2vw, 1.25rem);
 }
 
 html.timing-fullscreen .tv-heat__lanes {

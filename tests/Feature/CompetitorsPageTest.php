@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Competitor;
+use App\Models\Setting;
 use App\Models\User;
 use Database\Seeders\CompetitorSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -232,6 +233,71 @@ class CompetitorsPageTest extends TestCase
 
         $this->assertSame(0, Competitor::query()->whereNotNull('pill_number')->count());
         $this->assertSame(3, Competitor::query()->count());
+    }
+
+    public function test_opening_the_pill_modal_marks_the_driver_as_currently_drawing(): void
+    {
+        $competitor = Competitor::factory()->create(['pill_number' => null, 'first_name' => 'Ann', 'last_name' => 'First']);
+
+        Livewire::test('pages::competitors')
+            ->call('openPillModal', $competitor->id);
+
+        $this->assertSame($competitor->id, Setting::pillDrawCompetitorId());
+        $this->assertNull(Setting::pillDrawPendingPill());
+
+        Livewire::test('pages::competitors')
+            ->call('openPillModal', $competitor->id)
+            ->call('closePillModal');
+
+        $this->assertNull(Setting::pillDrawCompetitorId());
+        $this->assertNull(Setting::pillDrawPendingPill());
+    }
+
+    public function test_drawing_a_pill_publishes_it_to_the_tv_after_the_roll_reveals(): void
+    {
+        $competitor = Competitor::factory()->create(['pill_number' => null]);
+
+        $page = Livewire::test('pages::competitors')
+            ->call('openPillModal', $competitor->id)
+            ->call('drawPill');
+
+        $pill = $page->get('drawnPill');
+        $this->assertNull(Setting::pillDrawPendingPill());
+
+        $page->call('revealDrawnPill');
+        $this->assertSame($pill, Setting::pillDrawPendingPill());
+        $this->assertNull($competitor->refresh()->pill_number);
+    }
+
+    public function test_saving_or_clearing_a_pill_clears_currently_drawing(): void
+    {
+        $competitor = Competitor::factory()->create(['pill_number' => null]);
+
+        $page = Livewire::test('pages::competitors')
+            ->call('openPillModal', $competitor->id)
+            ->set('manualPill', '17')
+            ->call('savePill');
+
+        $this->assertNull(Setting::pillDrawCompetitorId());
+        $this->assertSame(17, $competitor->refresh()->pill_number);
+
+        $page->call('openPillModal', $competitor->id);
+        $this->assertSame($competitor->id, Setting::pillDrawCompetitorId());
+
+        $page->call('clearPill');
+        $this->assertNull(Setting::pillDrawCompetitorId());
+        $this->assertNull($competitor->refresh()->pill_number);
+    }
+
+    public function test_clear_pill_draw_also_clears_currently_drawing(): void
+    {
+        $competitor = Competitor::factory()->create(['pill_number' => 7]);
+
+        Livewire::test('pages::competitors')
+            ->call('openPillModal', $competitor->id)
+            ->call('clearPillDraw');
+
+        $this->assertNull(Setting::pillDrawCompetitorId());
     }
 
     public function test_inline_edit_updates_a_field(): void

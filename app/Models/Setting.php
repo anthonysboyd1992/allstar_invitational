@@ -77,6 +77,16 @@ class Setting extends Model
 
     public const TvBoardLineup = 'lineup-board';
 
+    /**
+     * Competitor currently open in the Competitors pill-draw modal (TV highlight).
+     */
+    public const PillDrawCompetitor = 'pill_draw_competitor_id';
+
+    /**
+     * Pending pill shown on TV before Save lands the driver in a heat.
+     */
+    public const PillDrawPendingPill = 'pill_draw_pending_pill';
+
     public const LetterheadDirectory = 'letterhead';
 
     /**
@@ -173,6 +183,41 @@ class Setting extends Model
         return ($mode ?? static::tvBoardMode()) === self::TvBoardLineup
             ? 'Lineup Board'
             : 'Pill Draw';
+    }
+
+    public static function pillDrawCompetitorId(): ?int
+    {
+        $id = (int) static::get(self::PillDrawCompetitor);
+
+        return $id > 0 ? $id : null;
+    }
+
+    public static function putPillDrawCompetitorId(?int $id): void
+    {
+        static::put(self::PillDrawCompetitor, $id !== null && $id > 0 ? (string) $id : null);
+
+        if ($id === null || $id <= 0) {
+            static::putPillDrawPendingPill(null);
+        }
+    }
+
+    public static function pillDrawCompetitor(): ?Competitor
+    {
+        $id = static::pillDrawCompetitorId();
+
+        return $id ? Competitor::query()->find($id) : null;
+    }
+
+    public static function pillDrawPendingPill(): ?int
+    {
+        $pill = (int) static::get(self::PillDrawPendingPill);
+
+        return $pill > 0 ? $pill : null;
+    }
+
+    public static function putPillDrawPendingPill(?int $pill): void
+    {
+        static::put(self::PillDrawPendingPill, $pill !== null && $pill > 0 ? (string) $pill : null);
     }
 
     /**
