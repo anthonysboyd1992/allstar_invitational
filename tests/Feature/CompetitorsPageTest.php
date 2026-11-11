@@ -218,6 +218,22 @@ class CompetitorsPageTest extends TestCase
         $this->assertSame(42, $competitor->refresh()->pill_number);
     }
 
+    public function test_clear_pill_draw_wipes_every_pill(): void
+    {
+        Competitor::factory()->create(['pill_number' => 7, 'first_name' => 'Ann']);
+        Competitor::factory()->create(['pill_number' => 12, 'first_name' => 'Bob']);
+        Competitor::factory()->create(['pill_number' => null, 'first_name' => 'Cat']);
+
+        Livewire::test('pages::competitors')
+            ->assertSee('Clear pill draw')
+            ->assertSeeHtml('wire:confirm="Clear every pill number and start the pill draw over? This cannot be undone."')
+            ->call('clearPillDraw')
+            ->assertDispatched('notify');
+
+        $this->assertSame(0, Competitor::query()->whereNotNull('pill_number')->count());
+        $this->assertSame(3, Competitor::query()->count());
+    }
+
     public function test_inline_edit_updates_a_field(): void
     {
         $competitor = Competitor::factory()->create();

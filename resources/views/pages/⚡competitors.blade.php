@@ -287,6 +287,18 @@ new #[Title('Competitors')] class extends Component
         $this->closePillModal();
     }
 
+    /**
+     * Wipe every competitor pill so the draw can start over.
+     */
+    public function clearPillDraw(): void
+    {
+        $count = Competitor::query()->whereNotNull('pill_number')->update(['pill_number' => null]);
+        $this->closePillModal();
+        $this->dispatch('notify', message: $count === 0
+            ? 'No pills to clear.'
+            : "Cleared {$count} ".($count === 1 ? 'pill' : 'pills').'.');
+    }
+
     public function delete(int $id): void
     {
         Competitor::query()->whereKey($id)->get()->each->deleteHeadshot();
@@ -562,6 +574,12 @@ new #[Title('Competitors')] class extends Component
                 target="_blank"
                 class="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-800"
             >Pill Draw TV</a>
+            <button
+                type="button"
+                wire:click="clearPillDraw"
+                wire:confirm="Clear every pill number and start the pill draw over? This cannot be undone."
+                class="rounded-md bg-white px-3 py-1.5 text-sm font-semibold text-red-700 ring-1 ring-red-300 hover:bg-red-50"
+            >Clear pill draw</button>
             <a
                 href="{{ route('competitors.print', ['sort' => $sortBy]) }}"
                 target="_blank"
