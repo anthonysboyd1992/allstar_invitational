@@ -30,8 +30,11 @@
                             ])
                         >{{ $label }}</a>
                         @if (
-                            ($routeName === 'competitors' && auth()->user()?->can('access-pill-draw'))
-                            || ($routeName === 'lineups' && ! auth()->user()?->canAccessArea('competitors') && auth()->user()?->can('access-pill-draw'))
+                            \Illuminate\Support\Facades\Route::has('pill-draw')
+                            && (
+                                ($routeName === 'competitors' && auth()->user()?->can('access-pill-draw'))
+                                || ($routeName === 'lineups' && ! auth()->user()?->canAccessArea('competitors') && auth()->user()?->can('access-pill-draw'))
+                            )
                         )
                             <a
                                 href="{{ route('pill-draw') }}"
@@ -43,7 +46,7 @@
                                 ])
                             >Pill Draw</a>
                         @endif
-                        @if ($routeName === 'lineups')
+                        @if ($routeName === 'lineups' && \Illuminate\Support\Facades\Route::has('lineup-board'))
                             <a
                                 href="{{ route('lineup-board') }}"
                                 wire:navigate
@@ -55,8 +58,11 @@
                             >Lineup Board</a>
                         @endif
                         @if (
-                            ($routeName === 'competitors' && auth()->user()?->can('access-tv'))
-                            || ($routeName === 'lineups' && ! auth()->user()?->canAccessArea('competitors') && auth()->user()?->can('access-tv'))
+                            \Illuminate\Support\Facades\Route::has('tv')
+                            && (
+                                ($routeName === 'competitors' && auth()->user()?->can('access-tv'))
+                                || ($routeName === 'lineups' && ! auth()->user()?->canAccessArea('competitors') && auth()->user()?->can('access-tv'))
+                            )
                         )
                             <a
                                 href="{{ route('tv') }}"
